@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.10)
+project(DigiScrap CXX)
+set(CMAKE_CXX_STANDARD 17)
+file(GLOB_RECURSE SRC src/*.cpp)
+add_executable(scrapbook ${SRC})
+target_include_directories(scrapbook PRIVATE src)
