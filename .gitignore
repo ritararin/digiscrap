@@ -1,0 +1,4 @@
+build/
+scrapbook
+*.o
+.DS_Store
