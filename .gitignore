@@ -1,4 +1,23 @@
+# Build artifacts
 build/
 scrapbook
 *.o
+*.obj
+*.exe
+*.dSYM/
+
+# Generated output (large PPMs; regenerate with `make run`)
+output/*.ppm
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# macOS
 .DS_Store
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
