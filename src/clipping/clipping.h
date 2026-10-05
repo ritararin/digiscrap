@@ -4,6 +4,10 @@
 // Cohen-Sutherland; returns false if fully outside
 bool clipLine(double& x0, double& y0, double& x1, double& y1,
               double xmin, double ymin, double xmax, double ymax);
+// Liang-Barsky uses the same inclusive window and endpoint-reference contract.
+// Both clippers leave endpoints unchanged on rejection. Bounds must be ordered.
+bool clipLineLiangBarsky(double& x0, double& y0, double& x1, double& y1,
+                        double xmin, double ymin, double xmax, double ymax);
 // Sutherland-Hodgman against a rectangle
 Polygon clipPolygon(const Polygon&, double xmin, double ymin, double xmax, double ymax);
 // Scanline fill
