@@ -1,5 +1,6 @@
 #include <iostream>
 #include <string>
+#include <filesystem>
 #include "core/framebuffer.h"
 #include "core/mat3.h"
 #include "core/scene.h"
@@ -7,6 +8,7 @@
 #include "lines/lines.h"
 #include "polygons/polygons.h"
 #include "clipping/clipping.h"
+#include "colour/colour.h"
 #include "circles/circles.h"
 #include "curves/curves.h"
 
@@ -24,7 +26,7 @@ namespace pal {
     const Color sage      {173, 170, 134};
     const Color terracotta{196,  92,  70};
     const Color shadow    {214, 186, 140};   // soft shadow on cream paper
-    const Color tapeA     {228, 165,  69, 200};   // translucent if setPixel blends alpha
+    const Color tapeA     {228, 165,  69, 200};
     const Color tapeB     {110, 145, 121, 200};
 }
 static const bool kDebug = false;   // true = show selection boxes and clip window
@@ -63,6 +65,15 @@ static void sticker(Framebuffer& f, const Polygon& p, Color fill, Color edge) {
     fillPolygon(f, p, fill);
     drawOutline(f, p, edge);
 }
+// Draw with the team's existing rasterisers, then blend the temporary layer.
+// This keeps setPixel's replacement semantics unchanged for other modules.
+static void blendLayer(Framebuffer& destination, const std::function<void(Framebuffer&)>& draw) {
+    Framebuffer layer(destination.width, destination.height, {0, 0, 0, 0});
+    draw(layer);
+    for (size_t index = 0; index < layer.pixels.size(); index++)
+        if (layer.pixels[index].a != 0)
+            destination.pixels[index] = alphaBlend(layer.pixels[index], destination.pixels[index]);
+}
 // Approximate width of text (assumes ~6*scale px per glyph; tweak if your font differs)
 static int textW(const std::string& s, int scale) { return (int)s.size() * 6 * scale - scale; }
 
@@ -95,13 +106,18 @@ void buildDayPage(Framebuffer& fb) {
         fillCircle(f, 395, 160, 30, pal::honey);             // sun
         fillPolygon(f, {{140,360},{140,295},{225,250},{320,305},{395,265},{460,300},{460,360}},
                     pal::deepGreen);                         // hills (concave scanline fill)
+        applyFilter(f, 140, 100, 460, 360, sepia);
         drawRect(f, 140, 100, 460, 360, pal::dark);
     });
 
-    // 3. Washi tape (alpha blended if setPixel supports it)
+    // 3. Washi tape: source-over blending reveals the photo and frame beneath.
     s.add("tape", [](Framebuffer& f) {
-        fillPolygon(f, placed(rectPoly(-45,-13,45,13), -35, 1.0, {140, 92}), pal::tapeA);
-        fillPolygon(f, placed(rectPoly(-45,-13,45,13),  35, 1.0, {462, 92}), pal::tapeB);
+        blendLayer(f, [](Framebuffer& layer) {
+            fillPolygon(layer, placed(rectPoly(-45,-13,45,13), -35, 1.0, {140, 92}), pal::tapeA);
+        });
+        blendLayer(f, [](Framebuffer& layer) {
+            fillPolygon(layer, placed(rectPoly(-45,-13,45,13), 35, 1.0, {462, 92}), pal::tapeB);
+        });
     });
 
     // 4. Stickers
@@ -126,7 +142,7 @@ void buildDayPage(Framebuffer& fb) {
     });
     s.add("square", [](Framebuffer& f) {
         sticker(f, placed(makeSquare({0,0}, 64), 20, 1.0, {560, 290}),
-                pal::honey, {170, 120, 40});
+                tint(pal::honey, pal::green, 0.55), {170, 120, 40});
     });
     s.add("circle", [](Framebuffer& f) {
         fillCircle(f, 703, 246, 36, pal::shadow);            // shadow
@@ -212,15 +228,25 @@ void buildCalendar(Framebuffer& fb) {
 
 // ---------- entry point ----------
 int main() {
+    std::error_code error;
+    std::filesystem::create_directories("output", error);
+    if (error) {
+        std::cerr << "Cannot create output directory: " << error.message() << "\n";
+        return 1;
+    }
     Framebuffer day(800, 600, pal::brown);
     buildDayPage(day);
-    day.saveBMP("output/day_page.bmp");
-    day.savePPM("output/day_page.ppm");
+    if (!day.saveBMP("output/day_page.bmp") || !day.savePPM("output/day_page.ppm")) {
+        std::cerr << "Cannot save day page\n";
+        return 1;
+    }
 
     Framebuffer cal(800, 600, pal::brown);
     buildCalendar(cal);
-    cal.saveBMP("output/calendar.bmp");
-    cal.savePPM("output/calendar.ppm");
+    if (!cal.saveBMP("output/calendar.bmp") || !cal.savePPM("output/calendar.ppm")) {
+        std::cerr << "Cannot save calendar\n";
+        return 1;
+    }
 
     std::cout << "Wrote output/day_page.* and output/calendar.*\n";
     return 0;
