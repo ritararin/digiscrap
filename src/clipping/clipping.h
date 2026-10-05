@@ -8,7 +8,8 @@ bool clipLine(double& x0, double& y0, double& x1, double& y1,
 // Both clippers leave endpoints unchanged on rejection. Bounds must be ordered.
 bool clipLineLiangBarsky(double& x0, double& y0, double& x1, double& y1,
                         double xmin, double ymin, double xmax, double ymax);
-// Sutherland-Hodgman against a rectangle
+// Sutherland-Hodgman: an ordered polygon against an inclusive rectangle.
+// Fewer than three input vertices or reversed bounds return an empty list.
 Polygon clipPolygon(const Polygon&, double xmin, double ymin, double xmax, double ymax);
 // Scanline fill
 void fillPolygon(Framebuffer&, const Polygon&, Color);

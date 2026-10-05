@@ -82,4 +82,47 @@ bool clipLineLiangBarsky(double& x0, double& y0, double& x1, double& y1,
 	return true;
 }
 
-Polygon clipPolygon(const Polygon& p, double, double, double, double) { return p; }                 // TODO owner
+Polygon clipPolygon(const Polygon& polygon, double xmin, double ymin, double xmax, double ymax) {
+	if (polygon.size() < 3 || xmin > xmax || ymin > ymax) return {};
+	Polygon output = polygon;
+	// Clip against left, right, below and above in turn. Each pass walks the
+	// closed boundary, including the edge from the final vertex to the first.
+	for (int edge = 0; edge < 4; edge++) {
+		Polygon input = std::move(output);
+		output.clear();
+		if (input.empty()) break;
+		auto inside = [&](Vec2 vertex) {
+			switch (edge) {
+				case 0: return vertex.x >= xmin;
+				case 1: return vertex.x <= xmax;
+				case 2: return vertex.y >= ymin;
+				default: return vertex.y <= ymax;
+			}
+		};
+		auto intersection = [&](Vec2 previous, Vec2 current) -> Vec2 {
+			// Called only when inside/outside changes: the segment crosses
+			// this boundary, so its corresponding coordinate changes too.
+			if (edge < 2) {
+				double boundary = edge == 0 ? xmin : xmax;
+				double parameter = (boundary - previous.x) / (current.x - previous.x);
+				return {boundary, previous.y + parameter * (current.y - previous.y)};
+			}
+			double boundary = edge == 2 ? ymin : ymax;
+			double parameter = (boundary - previous.y) / (current.y - previous.y);
+			return {previous.x + parameter * (current.x - previous.x), boundary};
+		};
+		Vec2 previous = input.back();
+		bool previousInside = inside(previous);
+		for (Vec2 current : input) {
+			bool currentInside = inside(current);
+			// in->out emits only the intersection; out->in emits it then
+			// current. in->in keeps current; out->out emits nothing.
+			if (previousInside != currentInside)
+				output.push_back(intersection(previous, current));
+			if (currentInside) output.push_back(current);
+			previous = current;
+			previousInside = currentInside;
+		}
+	}
+	return output;
+}
