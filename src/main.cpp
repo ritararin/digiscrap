@@ -74,8 +74,8 @@ static void blendLayer(Framebuffer& destination, const std::function<void(Frameb
         if (layer.pixels[index].a != 0)
             destination.pixels[index] = alphaBlend(layer.pixels[index], destination.pixels[index]);
 }
-// Approximate width of text (assumes ~6*scale px per glyph; tweak if your font differs)
-static int textW(const std::string& s, int scale) { return (int)s.size() * 6 * scale - scale; }
+// Measure the font's letter/digit widths, including character spacing.
+static int textW(const std::string& s, int scale) { return textWidth(s, scale); }
 
 // ---------- day page ----------
 void buildDayPage(Framebuffer& fb) {
@@ -183,7 +183,7 @@ void buildCalendar(Framebuffer& fb) {
     fillPolygon(fb, card, pal::cream);
 
     // Title and weekday header
-    std::string title = "OCTOBER 2026";
+    std::string title = "2026";
     drawText(fb, 412 - textW(title, 5) / 2, 70, title, 5, pal::dark);
     const char* days[7] = {"S", "M", "T", "W", "T", "F", "S"};
     for (int c = 0; c < 7; c++) {
