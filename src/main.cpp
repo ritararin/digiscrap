@@ -529,6 +529,11 @@ void buildDayPage(Framebuffer& fb) {
             pal::deepGreen
         );
     });
+    s.add("ellipse", [](Framebuffer& f) {
+        fillEllipse(f, 695, 146, 42, 26, pal::shadow);        // shadow
+        fillEllipse(f, 690, 140, 42, 26, pal::honey);
+        drawEllipseMidpoint(f, 690, 140, 42, 26, pal::brown);
+    });
 
 
     // CURVES: Catmull-Rom cloud:
