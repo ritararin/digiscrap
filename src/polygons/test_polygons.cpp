@@ -1,6 +1,13 @@
+#ifndef _USE_MATH_DEFINES
+#define _USE_MATH_DEFINES
+#endif
 #include "polygons/polygons.h"
 #include <iostream>
 #include <cmath>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 static int failures = 0;
 #define CHECK(cond, name) do { \
@@ -57,6 +64,27 @@ int main() {
     CHECK(std::fabs(spanPixels(heart) - polygonArea(heart)) < 0.03 * polygonArea(heart),
           "fill: heart pixel count within 3% of area");
 
+    // Ribbon checks
+    Polygon rib = makeRibbon(Vec2{200, 200}, 100, 40, 20);
+    CHECK(near(polygonArea(rib), 3200), "ribbon area == 3200");
+    Vec2 ribC = polygonCentroid(rib);
+    CHECK(near(ribC.x, 200) && near(ribC.y, 200), "ribbon centroid == (200,200)");
+    Vec2 ribMn, ribMx; boundingBox(rib, ribMn, ribMx);
+    CHECK(near(ribMn.x, 150) && near(ribMn.y, 180) && near(ribMx.x, 250) && near(ribMx.y, 220), "ribbon bounding box");
+    CHECK(pointInPolygon(rib, Vec2{200, 200}), "ribbon: centre inside");
+    CHECK(!pointInPolygon(rib, Vec2{300, 300}), "ribbon: far point outside");
+    CHECK(!pointInPolygon(rib, Vec2{155, 200}), "ribbon: left notch cutout outside");
+    CHECK(!pointInPolygon(rib, Vec2{245, 200}), "ribbon: right notch cutout outside");
+    CHECK(pointInPolygon(rib, Vec2{155, 185}), "ribbon: top-left corner body inside");
+    CHECK(std::labs(spanPixels(rib) - 3200) <= 80, "fill: ribbon pixel count ~ 3200");
+
+    Polygon wavy = makeWavyRibbon(Vec2{300, 300}, 120, 40, 10, 1.0, 15);
+    CHECK(wavy.size() > 20, "wavy ribbon has sampled vertices");
+    CHECK(pointInPolygon(wavy, Vec2{300, 300}), "wavy ribbon: centre inside");
+    CHECK(!pointInPolygon(wavy, Vec2{500, 500}), "wavy ribbon: far point outside");
+    CHECK(std::fabs(spanPixels(wavy) - polygonArea(wavy)) < 0.05 * polygonArea(wavy),
+          "fill: wavy ribbon pixel count within 5% of area");
+
     // ---- Visual test ----
     Framebuffer fb(800, 600);                    // ADAPT: constructor
     fb.clear(Color{250, 245, 235});              // ADAPT: clear + Color constructor
@@ -72,6 +100,16 @@ int main() {
 
     fillPolygon(fb, makeSquare(Vec2{620,330}, 120), Color{120,170,230});
     fillPolygon(fb, rotateAbout(makeSquare(Vec2{650,360}, 120), Vec2{650,360}, 0.5), Color{240,160,40});
+
+    // Ribbons: classic notched ribbon, flowing wavy ribbon, and angled ribbon
+    Polygon rib1 = makeRibbon(Vec2{160, 480}, 200, 50, 24);
+    fillPolygon(fb, rib1, Color{205, 50, 75});      // Classic ruby/crimson notched ribbon
+
+    Polygon rib2 = makeWavyRibbon(Vec2{410, 480}, 240, 44, 14, 1.0, 22);
+    fillPolygon(fb, rib2, Color{45, 155, 145});     // Flowing teal wavy ribbon
+
+    Polygon rib3 = makeRibbon(Vec2{280, 545}, 180, 40, 20);
+    fillPolygon(fb, rotateAbout(rib3, Vec2{280, 545}, -12 * M_PI / 180), Color{215, 130, 45}); // Angled amber ribbon
 
     fillPolygon(fb, makeStar(Vec2{780,580}, 100, 45), Color{90,90,90});   // runs off the page
 

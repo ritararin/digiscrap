@@ -1,7 +1,14 @@
+#ifndef _USE_MATH_DEFINES
+#define _USE_MATH_DEFINES
+#endif
 #include "polygons/polygons.h"
 #include <cmath>
 #include <algorithm>
 #include <vector>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 Polygon makeSquare(Vec2 c, double s) { double h = s/2; return {{c.x-h,c.y-h},{c.x+h,c.y-h},{c.x+h,c.y+h},{c.x-h,c.y+h}}; }
 Polygon makeStar(Vec2 c, double R, double r) {
@@ -48,6 +55,50 @@ Polygon makeDateStamp(Vec2 c, double w, double h, int notches) {
         p.push_back({left + i*step + step/2,   bottom - depth});
         p.push_back({left + i*step,            bottom});
     }
+    return p;
+}
+
+// Classic ribbon banner with V-notches (swallowtail cutouts) at the left and right ends
+Polygon makeRibbon(Vec2 c, double w, double h, double notchDepth) {
+    if (notchDepth < 0.0) notchDepth = h * 0.4;
+    double halfW = w / 2.0, halfH = h / 2.0;
+    Polygon p;
+    p.push_back({c.x - halfW, c.y - halfH});                  // Top-left
+    p.push_back({c.x + halfW, c.y - halfH});                  // Top-right
+    p.push_back({c.x + halfW - notchDepth, c.y});             // Right notch (inward)
+    p.push_back({c.x + halfW, c.y + halfH});                  // Bottom-right
+    p.push_back({c.x - halfW, c.y + halfH});                  // Bottom-left
+    p.push_back({c.x - halfW + notchDepth, c.y});             // Left notch (inward)
+    return p;
+}
+
+// Flowing ribbon banner with sinusoidal wave curvature and notched ends
+Polygon makeWavyRibbon(Vec2 c, double w, double h, double waveAmp, double waveFreq, double notchDepth, int samples) {
+    if (notchDepth < 0.0) notchDepth = h * 0.35;
+    if (samples < 8) samples = 8;
+    double halfW = w / 2.0, halfH = h / 2.0;
+    Polygon p;
+    // Top edge along the wave from left to right
+    for (int i = 0; i <= samples; i++) {
+        double u = (double)i / samples;
+        double x = c.x - halfW + u * w;
+        double y = c.y - halfH + waveAmp * std::sin(2.0 * M_PI * waveFreq * u);
+        p.push_back({x, y});
+    }
+    // Right notch
+    double rightWaveY = waveAmp * std::sin(2.0 * M_PI * waveFreq * 1.0);
+    p.push_back({c.x + halfW - notchDepth, c.y + rightWaveY});
+    p.push_back({c.x + halfW, c.y + halfH + rightWaveY});
+    // Bottom edge along the wave from right to left
+    for (int i = samples; i >= 0; i--) {
+        double u = (double)i / samples;
+        double x = c.x - halfW + u * w;
+        double y = c.y + halfH + waveAmp * std::sin(2.0 * M_PI * waveFreq * u);
+        p.push_back({x, y});
+    }
+    // Left notch
+    double leftWaveY = waveAmp * std::sin(0.0);
+    p.push_back({c.x - halfW + notchDepth, c.y + leftWaveY});
     return p;
 }
 

@@ -149,6 +149,11 @@ void buildDayPage(Framebuffer& fb) {
         fillCircle(f, 698, 240, 36, pal::green);
         drawCircleMidpoint(f, 698, 240, 36, pal::deepGreen);
     });
+    s.add("ellipse", [](Framebuffer& f) {
+        fillEllipse(f, 695, 146, 42, 26, pal::shadow);        // shadow
+        fillEllipse(f, 690, 140, 42, 26, pal::honey);
+        drawEllipseMidpoint(f, 690, 140, 42, 26, pal::brown);
+    });
 
     // 5. Date stamp (notched polygon + text)
     s.add("date", [](Framebuffer& f) {
