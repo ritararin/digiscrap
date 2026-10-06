@@ -9,6 +9,8 @@ Polygon makeHeart(Vec2 c, double size);
 Polygon makeSquare(Vec2 c, double side);
 Polygon makeRegularPolygon(Vec2 c, double R, int sides);
 Polygon makeDateStamp(Vec2 c, double w, double h, int notches = 8);
+Polygon makeRibbon(Vec2 c, double w, double h, double notchDepth = -1.0);
+Polygon makeWavyRibbon(Vec2 c, double w, double h, double waveAmp = 12.0, double waveFreq = 1.0, double notchDepth = -1.0, int samples = 32);
 
 // ---- Operations ----
 // (polygon transform already exists in core/mat3.h, so it is not declared here)
