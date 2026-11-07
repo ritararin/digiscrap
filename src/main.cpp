@@ -14,6 +14,7 @@
 #include "circles/circles.h"
 #include "curves/curves.h"
 #include "animation/demo_sequences.h"
+#include "stickers/demo_drag.h"
 
 
 // ---------- shared palette (taken from the project deck) ----------
@@ -1066,5 +1067,6 @@ int main() {
         << "Wrote output/day_page.* and output/calendar.*\n";
 
     runDemoSequences();
+    runStickerDemos();
     return 0;
 }

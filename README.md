@@ -146,7 +146,7 @@ ctest --test-dir build --output-on-failure -C Release
 
 ```bash
 # Compile and run the demo
-g++ -Isrc -std=c++17 -D_USE_MATH_DEFINES -O2 src/main.cpp src/lines/lines.cpp src/polygons/polygons.cpp src/clipping/clipping.cpp src/circles/circles.cpp src/curves/curves.cpp src/colour/colour.cpp src/animation/exporter.cpp src/animation/demo_sequences.cpp -o scrapbook.exe
+g++ -Isrc -std=c++17 -D_USE_MATH_DEFINES -O2 src/main.cpp src/lines/lines.cpp src/polygons/polygons.cpp src/clipping/clipping.cpp src/circles/circles.cpp src/curves/curves.cpp src/colour/colour.cpp src/animation/exporter.cpp src/animation/demo_sequences.cpp src/stickers/demo_drag.cpp -o scrapbook.exe
 ./scrapbook.exe
 
 # Compile and run the test suites
@@ -161,6 +161,9 @@ g++ -Isrc -std=c++17 -D_USE_MATH_DEFINES -O2 src/circles/test_lines_circles.cpp 
 
 g++ -Isrc -std=c++17 -D_USE_MATH_DEFINES -O2 src/animation/test_animation_core.cpp src/animation/exporter.cpp -o animation_test.exe
 ./animation_test.exe
+
+g++ -Isrc -std=c++17 -D_USE_MATH_DEFINES -O2 src/stickers/test_stickers.cpp src/polygons/polygons.cpp src/lines/lines.cpp -o sticker_test.exe
+./sticker_test.exe
 ```
 
 ---
@@ -181,6 +184,9 @@ g++ -Isrc -std=c++17 -D_USE_MATH_DEFINES -O2 src/animation/test_animation_core.c
   - `clipping_colour_test`: Validates line clipping against 120,000 randomized test lines, edge cases, polygon clipping, color filters, and alpha blending.
   - `lines_circles_test`: Validates Bresenham across all 8 octants, midpoint circle 8-way symmetry and radial distance, circle fill pixel counts, and midpoint ellipse 4-way symmetry and algebraic fit.
   - `animation_test`: Validates `Mat3` rotation, reflection, shear and inverse (M·M⁻¹ = I, singular matrices), `Transform` pivot behaviour, `lerp` exactness at both ends, `Timeline` (first frame t = 0, last frame t = 1), timed `Scene` layers, and the frame exporter (file names, downscale, contact sheet size).
-- **Checkpoint 2, Animation Core**: `Transform`, extended `Mat3` (shear, reflection, inverse), `Timeline`/`lerp`, frame exporter with contact sheets, animated `Scene` layers and three demo sequences. Frames are written to `output/anim/` (not committed, about 100 MB); sample contact sheets are committed.
+  - `sticker_test`: Validates transformed polygon area scaling by $s^2$, non-uniform scaling ($s_x \cdot s_y$), inverse-matrix hit testing after rotation ($0^\circ, 45^\circ, 90^\circ, 135^\circ, 180^\circ, 270^\circ$), matrix inverse round-trip ($M \cdot M^{-1} \approx I$), z-order pick priority, `bringToFront`, and polygon vertex morphing endpoints and continuity.
+- **Checkpoint 2, Animation Core & Stickers**:
+  - **Animation Core**: `Transform`, extended `Mat3` (shear, reflection, inverse), `Timeline`/`lerp`, frame exporter with contact sheets, animated `Scene` layers and three demo sequences. Frames are written to `output/anim/` (not committed, about 100 MB); sample contact sheets are committed.
+  - **Stickers & Interactive Transforms**: `Sticker` struct bundling polygon, `Transform`, colour and `zOrder`; composite affine transformations about centroid pivot; inverse-matrix hit testing; `StickerScene` front-to-back picking and `bringToFront`; scripted drag simulation sequence; and polygon vertex morphing.
 
 ---
