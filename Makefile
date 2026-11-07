@@ -5,13 +5,14 @@ MODULE_SRC = src/lines/lines.cpp src/polygons/polygons.cpp \
              src/clipping/clipping.cpp src/circles/circles.cpp \
              src/curves/curves.cpp src/colour/colour.cpp
 ANIM_SRC = src/animation/exporter.cpp src/animation/demo_sequences.cpp   # NEW
+STICKER_SRC = src/stickers/demo_drag.cpp
 HEADERS = $(wildcard src/*/*.h)
 
 .PHONY: all run test clean
-all: scrapbook polygons_test clipping_colour_test lines_circles_test animation_test
+all: scrapbook polygons_test clipping_colour_test lines_circles_test animation_test sticker_test
 
-scrapbook: src/main.cpp $(MODULE_SRC) $(ANIM_SRC) $(HEADERS)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) src/main.cpp $(MODULE_SRC) $(ANIM_SRC) -o $@
+scrapbook: src/main.cpp $(MODULE_SRC) $(ANIM_SRC) $(STICKER_SRC) $(HEADERS)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) src/main.cpp $(MODULE_SRC) $(ANIM_SRC) $(STICKER_SRC) -o $@
 
 polygons_test: src/polygons/test_polygons.cpp $(MODULE_SRC) $(HEADERS)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) src/polygons/test_polygons.cpp $(MODULE_SRC) -o $@
@@ -25,6 +26,9 @@ lines_circles_test: src/circles/test_lines_circles.cpp $(MODULE_SRC) $(HEADERS)
 animation_test: src/animation/test_animation_core.cpp src/animation/exporter.cpp $(HEADERS)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) src/animation/test_animation_core.cpp src/animation/exporter.cpp -o $@
 
+sticker_test: src/stickers/test_stickers.cpp src/polygons/polygons.cpp src/lines/lines.cpp $(HEADERS)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) src/stickers/test_stickers.cpp src/polygons/polygons.cpp src/lines/lines.cpp -o $@
+
 ifeq ($(OS),Windows_NT)
   MKDIR_OUTPUT = if not exist output mkdir output
   RUN_SCRAPBOOK = scrapbook.exe
@@ -32,6 +36,7 @@ ifeq ($(OS),Windows_NT)
   RUN_CLIPPING = clipping_colour_test.exe
   RUN_LINES_CIRCLES = lines_circles_test.exe
   RUN_ANIM = animation_test.exe
+  RUN_STICKER = sticker_test.exe
 else
   MKDIR_OUTPUT = mkdir -p output
   RUN_SCRAPBOOK = ./scrapbook
@@ -39,18 +44,20 @@ else
   RUN_CLIPPING = ./clipping_colour_test
   RUN_LINES_CIRCLES = ./lines_circles_test
   RUN_ANIM = ./animation_test
+  RUN_STICKER = ./sticker_test
 endif
 
 run: scrapbook
 	$(MKDIR_OUTPUT)
 	$(RUN_SCRAPBOOK)
 
-test: polygons_test clipping_colour_test lines_circles_test animation_test
+test: polygons_test clipping_colour_test lines_circles_test animation_test sticker_test
 	$(MKDIR_OUTPUT)
 	$(RUN_POLYGONS)
 	$(RUN_CLIPPING)
 	$(RUN_LINES_CIRCLES)
 	$(RUN_ANIM)
+	$(RUN_STICKER)
 
 clean:
-	rm -f scrapbook polygons_test clipping_colour_test lines_circles_test animation_test scrapbook.exe polygons_test.exe clipping_colour_test.exe lines_circles_test.exe animation_test.exe
+	rm -f scrapbook polygons_test clipping_colour_test lines_circles_test animation_test sticker_test scrapbook.exe polygons_test.exe clipping_colour_test.exe lines_circles_test.exe animation_test.exe sticker_test.exe
