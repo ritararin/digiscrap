@@ -21,3 +21,11 @@ cmake_install.cmake
 .vscode/
 .idea/
 *.swp
+
+output/anim/
+animation_test
+test_anim_out/
+
+polygons_test
+clipping_colour_test
+lines_circles_test

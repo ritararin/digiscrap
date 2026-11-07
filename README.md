@@ -13,14 +13,15 @@ DigiScrap is a paired computer graphics project designed to demonstrate fundamen
 - **Two Complete Project Demonstrations**:
   1. **A Day Page (`output/day_page.bmp`)**: A layered scrapbook layout with binder backing, card drop shadow, procedural landscape photo, sepia filter, semi-transparent washi tape via source-over alpha blending, rotated stickers (star, heart, square, hexagon, circle, ellipse, ribbon), Catmull-Rom cloud, a date stamp, and a corner star clipped against the card edge.
   2. **A Calendar Month Grid (`output/calendar.bmp`)**: A complete October 2026 calendar page with header labels, weekday column headers, 35-cell grid with tinted weekends, divider lines rasterized via integer Bresenham, a highlighted day (Day 5) with a centered gold star, and mini scrapbook stickers.
+- **Checkpoint 2 Animation**: Three short demo animations (`output/anim/`) built on the animation core: stickers flying onto the day page, a calendar highlight moving between days, and a day-page-to-calendar crossfade.
 
 ---
 
 ## Group Members and Responsibilities
 
-| Member |  | Responsibilities |
+| Member | Student ID | Responsibilities |
 | :--- | :--- | :--- |
-| **Ian Tuitoek** | 165913 | **Core Architecture & Engine Foundation**: Designed `Framebuffer` pixel buffer, 24-bit uncompressed BMP and Netpbm P6 PPM exporters, 3×3 homogeneous affine matrix system (`Mat3`), `Scene` painter's-order layer manager, 3×5 bitmap font engine, and initial demo pipeline. |
+| **Ian Tuitoek** | 165913 | **Core Architecture & Engine Foundation**: Designed `Framebuffer` pixel buffer, 24-bit uncompressed BMP and Netpbm P6 PPM exporters, 3×3 homogeneous affine matrix system (`Mat3`), `Scene` painter's-order layer manager, 3×5 bitmap font engine, and initial demo pipeline. **CP2 — Animation Core & Integration**: `Transform`, `Timeline`/`lerp`, `Mat3` inverse/shear/reflection, frame exporter with contact sheets, animated `Scene` layers, demo sequences, and merging all `cp2-*` branches. |
 | **Rita Palmeris** | 159314 | **Polygons & Scanline Fill**: Polygon vector representation, geometric shape generators (`makeStar`, `makeHeart`, `makeSquare`, `makeRegularPolygon`, `makeDateStamp`), bounding box, Shoelace area, centroid calculation, ray-casting point-in-polygon test, and active-edge-table scanline fill algorithm. |
 | **Myra Nyamwanda** | 166982 | **Clipping & Colour Pipeline**: Cohen-Sutherland line clipping (4-bit outcodes), Liang-Barsky parametric line clipping, Sutherland-Hodgman polygon clipping, colour filters (`grayscale`, `sepia`, `tint`, `brightness`, `contrast`, `invert`), RGBA source-over alpha blending, and 120,000-line randomized test harness. |
 | **Alvin Eredi** | 168560 | **Lines, Circles, Ellipses & Calendar Grid**: All-octant integer-arithmetic Bresenham line algorithm, Midpoint circle outline and integer scanline circle fill, Midpoint ellipse outline (two-region partition) and scanline fill, ribbon generators (`makeRibbon`, `makeWavyRibbon`), lines/circles test suite, and calendar grid integration. |
@@ -30,7 +31,7 @@ DigiScrap is a paired computer graphics project designed to demonstrate fundamen
 
 ## Technologies & Tools
 
-- **Programming Language**: C++17 .
+- **Programming Language**: C++17.
 - **Compilers Supported**:
   - GCC / MinGW (`g++` 11+ / 15+)
   - Microsoft Visual Studio C++ (MSVC 2019/2022)
@@ -87,6 +88,14 @@ DigiScrap is a paired computer graphics project designed to demonstrate fundamen
 - **Drop Shadows & Compositing**: Offset shadow polygons and multi-layer rendering order via `Scene`.
 - **Typography**: Custom 3×5 bitmap font rendering digits `0-9`, hyphen `-`, and uppercase letters `A-Z`.
 
+### 7. Animation Core (Checkpoint 2)
+- **Transform**: position, rotation (degrees), scale and pivot, converted to a 3×3 homogeneous matrix as `T(position) · R · S · T(−pivot)`, so objects rotate and scale about their own pivot.
+- **Extended `Mat3`**: shear, reflection (across the x-axis, y-axis or any line through the origin), determinant, an adjugate-based **inverse** (available for hit-testing and zoom), and a matrix-times-point helper.
+- **Timeline and lerp**: each frame gets a time `t` from exactly 0 to exactly 1; `lerp` interpolates numbers, `Vec2` and `Color`, and is exact at both ends.
+- **Frame exporter**: renders every frame through `renderFrame(fb, t)`, saves numbered BMPs (`output/anim/name_0001.bmp`) and a contact sheet of evenly spaced frames built with a box-filter downscale.
+- **Animated Scene layers**: `addAnimated` and `addTimed` layers and `render(fb, t)`.
+- **Demo sequences** (`src/animation/demo_sequences.cpp`): stickers flying onto the day page, a calendar highlight moving between days, and a day-page-to-calendar crossfade.
+
 ---
 
 ## How to Compile and Run
@@ -104,10 +113,10 @@ mingw32-make all       # On Windows (MinGW)
 # or: make all         # On Linux / macOS
 
 # Run the test suites
-mingw32-make test      # Runs polygons_test, clipping_colour_test, and lines_circles_test
+mingw32-make test      # Runs polygons_test, clipping_colour_test, lines_circles_test and animation_test
 # or: make test
 
-# Run the scrapbook demo (generates output images)
+# Run the scrapbook demo (generates output images and animation frames)
 mingw32-make run
 # or: make run
 
@@ -137,18 +146,21 @@ ctest --test-dir build --output-on-failure -C Release
 
 ```bash
 # Compile and run the demo
-g++ -Isrc -std=c++17 -D_USE_MATH_DEFINES -O2 src/main.cpp src/lines/lines.cpp src/polygons/polygons.cpp src/clipping/clipping.cpp src/circles/circles.cpp src/curves/curves.cpp src/colour/colour.cpp -o scrapbook.exe
+g++ -Isrc -std=c++17 -D_USE_MATH_DEFINES -O2 src/main.cpp src/lines/lines.cpp src/polygons/polygons.cpp src/clipping/clipping.cpp src/circles/circles.cpp src/curves/curves.cpp src/colour/colour.cpp src/animation/exporter.cpp src/animation/demo_sequences.cpp -o scrapbook.exe
 ./scrapbook.exe
 
 # Compile and run the test suites
 g++ -Isrc -std=c++17 -D_USE_MATH_DEFINES -O2 src/polygons/test_polygons.cpp src/lines/lines.cpp src/polygons/polygons.cpp src/clipping/clipping.cpp src/circles/circles.cpp src/curves/curves.cpp src/colour/colour.cpp -o polygons_test.exe
 ./polygons_test.exe
 
-g++ -Isrc -D_USE_MATH_DEFINES -O2 src/clipping/test_clipping_colour.cpp src/lines/lines.cpp src/polygons/polygons.cpp src/clipping/clipping.cpp src/circles/circles.cpp src/curves/curves.cpp src/colour/colour.cpp -o clipping_colour_test.exe
+g++ -Isrc -std=c++17 -D_USE_MATH_DEFINES -O2 src/clipping/test_clipping_colour.cpp src/lines/lines.cpp src/polygons/polygons.cpp src/clipping/clipping.cpp src/circles/circles.cpp src/curves/curves.cpp src/colour/colour.cpp -o clipping_colour_test.exe
 ./clipping_colour_test.exe
 
-g++ -Isrc -D_USE_MATH_DEFINES -O2 src/circles/test_lines_circles.cpp src/lines/lines.cpp src/polygons/polygons.cpp src/clipping/clipping.cpp src/circles/circles.cpp src/curves/curves.cpp src/colour/colour.cpp -o lines_circles_test.exe
+g++ -Isrc -std=c++17 -D_USE_MATH_DEFINES -O2 src/circles/test_lines_circles.cpp src/lines/lines.cpp src/polygons/polygons.cpp src/clipping/clipping.cpp src/circles/circles.cpp src/curves/curves.cpp src/colour/colour.cpp -o lines_circles_test.exe
 ./lines_circles_test.exe
+
+g++ -Isrc -std=c++17 -D_USE_MATH_DEFINES -O2 src/animation/test_animation_core.cpp src/animation/exporter.cpp -o animation_test.exe
+./animation_test.exe
 ```
 
 ---
@@ -168,6 +180,7 @@ g++ -Isrc -D_USE_MATH_DEFINES -O2 src/circles/test_lines_circles.cpp src/lines/l
   - `polygons_test`: Validates exact area, centroid, bounding box, ray-casting inside/outside, ribbons, and scanline fill pixel count accuracy.
   - `clipping_colour_test`: Validates line clipping against 120,000 randomized test lines, edge cases, polygon clipping, color filters, and alpha blending.
   - `lines_circles_test`: Validates Bresenham across all 8 octants, midpoint circle 8-way symmetry and radial distance, circle fill pixel counts, and midpoint ellipse 4-way symmetry and algebraic fit.
+  - `animation_test`: Validates `Mat3` rotation, reflection, shear and inverse (M·M⁻¹ = I, singular matrices), `Transform` pivot behaviour, `lerp` exactness at both ends, `Timeline` (first frame t = 0, last frame t = 1), timed `Scene` layers, and the frame exporter (file names, downscale, contact sheet size).
+- **Checkpoint 2, Animation Core**: `Transform`, extended `Mat3` (shear, reflection, inverse), `Timeline`/`lerp`, frame exporter with contact sheets, animated `Scene` layers and three demo sequences. Frames are written to `output/anim/` (not committed, about 100 MB); sample contact sheets are committed.
 
 ---
-

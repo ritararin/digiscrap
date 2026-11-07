@@ -13,6 +13,7 @@
 #include "colour/colour.h"
 #include "circles/circles.h"
 #include "curves/curves.h"
+#include "animation/demo_sequences.h"
 
 
 // ---------- shared palette (taken from the project deck) ----------
@@ -1064,6 +1065,6 @@ int main() {
     std::cout
         << "Wrote output/day_page.* and output/calendar.*\n";
 
-
+    runDemoSequences();
     return 0;
 }
