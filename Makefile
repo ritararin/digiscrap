@@ -1,14 +1,19 @@
 CXX ?= g++
 CXXFLAGS ?= -std=c++17 -O2 -Wall
 CPPFLAGS += -Isrc -D_USE_MATH_DEFINES
+
 MODULE_SRC = src/lines/lines.cpp src/polygons/polygons.cpp \
              src/clipping/clipping.cpp src/circles/circles.cpp \
-             src/curves/curves.cpp src/colour/colour.cpp
-ANIM_SRC = src/animation/exporter.cpp src/animation/demo_sequences.cpp   # NEW
+             src/curves/curves.cpp src/colour/colour.cpp \
+             src/transitions/transitions.cpp
+
+ANIM_SRC = src/animation/exporter.cpp src/animation/demo_sequences.cpp
 STICKER_SRC = src/stickers/demo_drag.cpp
+
 HEADERS = $(wildcard src/*/*.h)
 
 .PHONY: all run test clean
+
 all: scrapbook polygons_test clipping_colour_test lines_circles_test animation_test sticker_test
 
 scrapbook: src/main.cpp $(MODULE_SRC) $(ANIM_SRC) $(STICKER_SRC) $(HEADERS)
@@ -60,4 +65,5 @@ test: polygons_test clipping_colour_test lines_circles_test animation_test stick
 	$(RUN_STICKER)
 
 clean:
-	rm -f scrapbook polygons_test clipping_colour_test lines_circles_test animation_test sticker_test scrapbook.exe polygons_test.exe clipping_colour_test.exe lines_circles_test.exe animation_test.exe sticker_test.exe
+	rm -f scrapbook polygons_test clipping_colour_test lines_circles_test animation_test sticker_test \
+	      scrapbook.exe polygons_test.exe clipping_colour_test.exe lines_circles_test.exe animation_test.exe sticker_test.exe

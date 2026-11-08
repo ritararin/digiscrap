@@ -14,7 +14,7 @@
 #include "polygons/polygons.h"
 #include "clipping/clipping.h"
 #include "circles/circles.h"
-
+#include "transitions/transitions.h"
 // ------------------------------------------------------------------
 // Shared drawing helpers
 // ------------------------------------------------------------------
@@ -128,24 +128,124 @@ static void renderCalendarMove(Framebuffer& fb, double t) {
 // ------------------------------------------------------------------
 
 static void renderCrossfade(Framebuffer& fb, double t) {
-    Framebuffer a(fb.width, fb.height, {250, 244, 230});
-    Framebuffer b(fb.width, fb.height, {255, 255, 255});
-    renderStickers(a, 1.0);
-    renderCalendarMove(b, 1.0);
-    for (size_t i = 0; i < fb.pixels.size(); i++)
-        fb.pixels[i] = lerp(a.pixels[i], b.pixels[i], t);
-}
 
-// ------------------------------------------------------------------
+    Framebuffer dayPage(
+        fb.width,
+        fb.height,
+        {250, 244, 230}
+    );
+
+    Framebuffer calendar(
+        fb.width,
+        fb.height,
+        {255, 255, 255}
+    );
+
+    renderStickers(
+        dayPage,
+        1.0
+    );
+
+    renderCalendarMove(
+        calendar,
+        1.0
+    );
+
+    crossfade(
+        fb,
+        dayPage,
+        calendar,
+        t
+    );
+}
+// Sequence 4: colour transition demo
+// Smoothly changes sticker and background colours over time.
+
+static void renderColourTransition(Framebuffer& fb, double t) {
+    // Animate the whole background from warm cream to soft green.
+    Color background = animateColour(
+        Color{250, 244, 230},
+        Color{190, 220, 195},
+        t
+    );
+
+    fb.clear(background);
+
+    // Animate a central heart from terracotta to purple.
+    Color heartColour = animateColour(
+        Color{196, 92, 70},
+        Color{130, 95, 190},
+        t
+    );
+
+    Color edgeColour = animateColour(
+        Color{120, 50, 35},
+        Color{70, 50, 120},
+        t
+    );
+
+    Polygon heart = makeHeart(
+        {400, 280},
+        170
+    );
+
+    fillPolygon(
+        fb,
+        heart,
+        heartColour
+    );
+
+    for (size_t i = 0; i < heart.size(); i++) {
+        Vec2 a = heart[i];
+        Vec2 b = heart[(i + 1) % heart.size()];
+
+        drawLineBresenham(
+            fb,
+            (int)a.x,
+            (int)a.y,
+            (int)b.x,
+            (int)b.y,
+            edgeColour
+        );
+    }
+
+    // Demonstrate fade-to-colour in the second half.
+    if (t > 0.5) {
+        Framebuffer original = fb;
+
+        double fadeT = segmentT(
+            t,
+            0.5,
+            1.0
+        );
+
+        fadeToColour(
+            fb,
+            original,
+            Color{255, 255, 255},
+            fadeT * 0.35
+        );
+    }
+
+    drawText(
+        fb,
+        260,
+        470,
+        "COLOUR TRANSITION",
+        3,
+        Color{50, 50, 50}
+    );
+}
 
 void runDemoSequences() {
     Timeline tl;                 // 24 frames at 12 fps
     struct Seq { const char* name; RenderFrameFn fn; Color bg; };
     const Seq seqs[] = {
-        {"stickers",  renderStickers,     {250, 244, 230}},
-        {"calendar",  renderCalendarMove, {255, 255, 255}},
-        {"crossfade", renderCrossfade,    {255, 255, 255}},
-    };
+    {"stickers",          renderStickers,          {250, 244, 230}},
+    {"calendar",          renderCalendarMove,      {255, 255, 255}},
+    {"crossfade",         renderCrossfade,         {255, 255, 255}},
+    {"colour_transition", renderColourTransition,  {250, 244, 230}},
+};
     for (const auto& s : seqs) {
         ExportResult r = exportAnimation(s.name, tl, 800, 600, s.bg, s.fn);
         if (r.ok) std::cout << "Wrote " << r.framesWritten << " frames and " << r.contactSheetPath << "\n";
