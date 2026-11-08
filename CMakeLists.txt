@@ -10,6 +10,7 @@ add_library(scrapbook_modules
 	src/circles/circles.cpp
 	src/curves/curves.cpp
 	src/colour/colour.cpp
+	src/transitions/transitions.cpp
 	src/animation/exporter.cpp
 	src/animation/demo_sequences.cpp
 	src/stickers/demo_drag.cpp)
