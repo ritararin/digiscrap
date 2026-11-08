@@ -10,6 +10,8 @@ add_library(scrapbook_modules
 	src/circles/circles.cpp
 	src/curves/curves.cpp
 	src/colour/colour.cpp
+	src/easing/easing.cpp
+	src/paths/paths.cpp
 	src/transitions/transitions.cpp
 	src/animation/exporter.cpp
 	src/animation/demo_sequences.cpp
@@ -27,6 +29,8 @@ add_executable(lines_circles_test src/circles/test_lines_circles.cpp)
 target_link_libraries(lines_circles_test PRIVATE scrapbook_modules)
 add_executable(sticker_test src/stickers/test_stickers.cpp)
 target_link_libraries(sticker_test PRIVATE scrapbook_modules)
+add_executable(easing_paths_test src/easing/test_easing_paths.cpp)
+target_link_libraries(easing_paths_test PRIVATE scrapbook_modules)
 
 enable_testing()
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/output")
@@ -34,11 +38,12 @@ add_test(NAME polygons COMMAND polygons_test)
 add_test(NAME clipping_colour COMMAND clipping_colour_test)
 add_test(NAME lines_circles COMMAND lines_circles_test)
 add_test(NAME stickers COMMAND sticker_test)
-set_tests_properties(polygons clipping_colour lines_circles stickers PROPERTIES
+add_test(NAME easing_paths COMMAND easing_paths_test)
+set_tests_properties(polygons clipping_colour lines_circles stickers easing_paths PROPERTIES
 	WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 add_custom_target(check
 	COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C $<CONFIG>
-	DEPENDS polygons_test clipping_colour_test lines_circles_test sticker_test
+	DEPENDS polygons_test clipping_colour_test lines_circles_test sticker_test easing_paths_test
 	WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
 add_custom_target(run
 	COMMAND $<TARGET_FILE:scrapbook>
