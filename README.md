@@ -185,8 +185,17 @@ g++ -Isrc -std=c++17 -D_USE_MATH_DEFINES -O2 src/stickers/test_stickers.cpp src/
   - `lines_circles_test`: Validates Bresenham across all 8 octants, midpoint circle 8-way symmetry and radial distance, circle fill pixel counts, and midpoint ellipse 4-way symmetry and algebraic fit.
   - `animation_test`: Validates `Mat3` rotation, reflection, shear and inverse (M·M⁻¹ = I, singular matrices), `Transform` pivot behaviour, `lerp` exactness at both ends, `Timeline` (first frame t = 0, last frame t = 1), timed `Scene` layers, and the frame exporter (file names, downscale, contact sheet size).
   - `sticker_test`: Validates transformed polygon area scaling by $s^2$, non-uniform scaling ($s_x \cdot s_y$), inverse-matrix hit testing after rotation ($0^\circ, 45^\circ, 90^\circ, 135^\circ, 180^\circ, 270^\circ$), matrix inverse round-trip ($M \cdot M^{-1} \approx I$), z-order pick priority, `bringToFront`, and polygon vertex morphing endpoints and continuity.
+  - `easing_paths_test`: Validates easing functions, Catmull-Rom & Bézier arc-length motion paths, and page curl edge interpolation.
+  - `opengl_test`: Validates 3x3 to 4x4 matrix conversion for OpenGL shaders, orthographic pixel-to-NDC projection, and transformation vector equivalence.
 - **Checkpoint 2, Animation Core & Stickers**:
-  - **Animation Core**: `Transform`, extended `Mat3` (shear, reflection, inverse), `Timeline`/`lerp`, frame exporter with contact sheets, animated `Scene` layers and three demo sequences. Frames are written to `output/anim/` (not committed, about 100 MB); sample contact sheets are committed.
+  - **Animation Core**: `Transform`, extended `Mat3` (shear, reflection, inverse), `Timeline`/`lerp`, frame exporter with contact sheets, animated `Scene` layers and three demo sequences.
+  - **Stickers & Interactive Transforms**: `Sticker` struct bundling polygon, `Transform`, colour and `zOrder`; composite affine transformations about centroid pivot; inverse-matrix hit testing; `StickerScene` front-to-back picking and `bringToFront`; scripted drag simulation sequence; and polygon vertex morphing.
+- **Checkpoint 3, OpenGL 3.3 Core Renderer & Windowing Foundation**:
+  - **Windowing & Event Loop**: 800×600 interactive GLFW window with V-Sync, dynamic framebuffer resize callback, keyboard callbacks, and escape exit.
+  - **Cross-Platform Dependencies**: `CMakeLists.txt` automatically fetches GLFW 3.4 via `FetchContent` if not installed locally; bundles GLAD OpenGL 3.3 Core profile loader.
+  - **Shader Loader**: Compiles vertex and fragment shaders with detailed compile/link error reporting.
+  - **Orthographic Projection & Matrix Conversion**: Computes top-left origin pixel-space orthographic projection matrix and converts `Mat3` affine transforms into column-major 4×4 float arrays for shaders.
+  - **Primary Deliverable & Fallback**: Renders smooth hardware-shaded coloured triangle (`gl::drawTriangle`), alongside a fallback that uploads the software `Framebuffer` as a dynamic OpenGL texture (`gl::drawFramebufferTexture`). Toggleable via keys `[1]`, `[2]`, `[3]`, `[4]`, or `[Space]`.
   - **Stickers & Interactive Transforms**: `Sticker` struct bundling polygon, `Transform`, colour and `zOrder`; composite affine transformations about centroid pivot; inverse-matrix hit testing; `StickerScene` front-to-back picking and `bringToFront`; scripted drag simulation sequence; and polygon vertex morphing.
 
 ---
