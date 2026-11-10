@@ -15,6 +15,9 @@
 #include "curves/curves.h"
 #include "animation/demo_sequences.h"
 #include "stickers/demo_drag.h"
+#include "opengl/window.h"
+#include "opengl/shader.h"
+#include "opengl/renderer.h"
 
 
 // ---------- shared palette (taken from the project deck) ----------
@@ -981,7 +984,7 @@ void buildCalendar(Framebuffer& fb) {
 
 // ---------- entry point ----------
 
-int main() {
+int main(int argc, char* argv[]) {
 
     std::error_code error;
 
@@ -1068,5 +1071,104 @@ int main() {
 
     runDemoSequences();
     runStickerDemos();
+
+    // Check for headless / non-interactive flag (useful for automated ctest / CI)
+    bool headless = false;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--headless" || arg == "--no-window" || arg == "-h") {
+            headless = true;
+        }
+    }
+
+    if (headless) {
+        std::cout << "[DigiScrap] Headless mode requested. Skipping OpenGL window.\n";
+        return 0;
+    }
+
+    std::cout << "\n=======================================================\n";
+    std::cout << "Starting OpenGL 3.3 Interactive Window (800x600)...\n";
+    std::cout << "Controls:\n";
+    std::cout << "  [1] Coloured Triangle (OpenGL Hardware Core)\n";
+    std::cout << "  [2] Scrapbook Day Page (Software Framebuffer Texture Fallback)\n";
+    std::cout << "  [3] Calendar Grid (Software Framebuffer Texture Fallback)\n";
+    std::cout << "  [4] Hardware Transformed Polygons (Mat3 to 4x4 Affine Shader)\n";
+    std::cout << "  [Space] Cycle modes\n";
+    std::cout << "  [ESC] Exit\n";
+    std::cout << "=======================================================\n\n";
+
+    GLFWwindow* window = gl::createWindow(800, 600, "DigiScrap - Scrapbook Studio (OpenGL 3.3 Core)");
+    if (!window) {
+        std::cerr << "Could not create GLFW window (no display available). Exiting cleanly.\n";
+        return 0;
+    }
+
+    if (!gl::initRenderer()) {
+        std::cerr << "Failed to initialise OpenGL renderer.\n";
+        gl::destroyWindow(window);
+        return 1;
+    }
+
+    int currentMode = 0; // 0: Triangle, 1: Day page fallback, 2: Calendar fallback, 3: Hardware polygons
+    double elapsedAnim = 0.0;
+
+    gl::WindowCallbacks cb;
+    cb.onResize = [](int w, int h) {
+        gl::setProjection(w, h);
+    };
+
+    cb.onKey = [&currentMode](int key, int action) {
+        if (action == 1) { // GLFW_PRESS
+            if (key == 49) currentMode = 0;                          // '1'
+            else if (key == 50) currentMode = 1;                     // '2'
+            else if (key == 51) currentMode = 2;                     // '3'
+            else if (key == 52) currentMode = 3;                     // '4'
+            else if (key == 32) currentMode = (currentMode + 1) % 4; // Space
+        }
+    };
+
+    cb.onUpdate = [&elapsedAnim](double dt) {
+        elapsedAnim += dt;
+    };
+
+    cb.onRender = [&]() {
+        if (currentMode == 0) {
+            // Coloured triangle (Task 1 primary deliverable)
+            // Rendered via gl::drawTriangle using OpenGL 3.3 Core shaders and ortho projection
+            gl::drawTriangle(400.0f, 100.0f,
+                             120.0f, 520.0f,
+                             680.0f, 520.0f,
+                             {230, 50, 90, 255},   // Red / Pink
+                             {110, 145, 121, 255}, // Green
+                             {249, 205, 125, 255}  // Honey yellow
+            );
+        } else if (currentMode == 1) {
+            // Fallback mode 1: Software Framebuffer as OpenGL Texture (Day page)
+            gl::drawFramebufferTexture(day);
+        } else if (currentMode == 2) {
+            // Fallback mode 2: Software Framebuffer as OpenGL Texture (Calendar)
+            gl::drawFramebufferTexture(cal);
+        } else if (currentMode == 3) {
+            // Hardware Mat3 Affine Transformed Polygons (demonstrates mat3ToMat4 in action)
+            Mat3 starTransform = Mat3::translate(400.0, 300.0)
+                               * Mat3::rotate(elapsedAnim * 0.8)
+                               * Mat3::scale(1.2 + 0.25 * std::sin(elapsedAnim * 2.0),
+                                             1.2 + 0.25 * std::sin(elapsedAnim * 2.0));
+            Polygon star = makeStar({0, 0}, 90, 40);
+            gl::drawPolygon(star, starTransform, {255, 200, 0, 230});
+            gl::drawPolyline(star, starTransform, {150, 110, 0, 255});
+
+            Mat3 heartTransform = Mat3::translate(200.0, 300.0)
+                                * Mat3::rotate(std::sin(elapsedAnim) * 0.3);
+            Polygon heart = makeHeart({0, 0}, 80);
+            gl::drawPolygon(heart, heartTransform, {230, 50, 90, 220});
+            gl::drawPolyline(heart, heartTransform, {120, 20, 50, 255});
+        }
+    };
+
+    gl::runLoop(window, cb);
+
+    gl::shutdownRenderer();
+    gl::destroyWindow(window);
     return 0;
 }
