@@ -32,3 +32,6 @@ lines_circles_test
 sticker_test
 easing_paths_test
 opengl_test
+textures_test
+test_tex.bmp
+test_tex.ppm

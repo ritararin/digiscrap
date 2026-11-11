@@ -18,6 +18,11 @@
 #include "opengl/window.h"
 #include "opengl/shader.h"
 #include "opengl/renderer.h"
+#include "opengl/texture_renderer.h"
+#include <ctime>
+#include <cstdio>
+#include "textures/image_loader.h"
+#include "textures/font_atlas.h"
 
 
 // ---------- shared palette (taken from the project deck) ----------
@@ -1093,6 +1098,8 @@ int main(int argc, char* argv[]) {
     std::cout << "  [2] Scrapbook Day Page (Software Framebuffer Texture Fallback)\n";
     std::cout << "  [3] Calendar Grid (Software Framebuffer Texture Fallback)\n";
     std::cout << "  [4] Hardware Transformed Polygons (Mat3 to 4x4 Affine Shader)\n";
+    std::cout << "  [5] Textured Photo + Filters + Tape + Date Stamp (Option 3)\n";
+    std::cout << "      [F] next filter  [Up/Down] filter strength   (run with --photo file.bmp|.ppm)\n";
     std::cout << "  [Space] Cycle modes\n";
     std::cout << "  [ESC] Exit\n";
     std::cout << "=======================================================\n\n";
@@ -1109,21 +1116,60 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // ---- Option 3: photo texture + font atlas (CPU loaders are our own code) ----
+    std::string photoPath;
+    for (int i = 1; i + 1 < argc; ++i)
+        if (std::string(argv[i]) == "--photo") photoPath = argv[i + 1];
+    Framebuffer photoImg(1, 1);
+    if (photoPath.empty() || !loadImage(photoPath, photoImg)) {
+        if (!photoPath.empty()) std::cerr << "Could not load " << photoPath << ", using the demo photo.\n";
+        photoImg = makeDemoPhoto(360, 270);
+    } else {
+        photoImg = resizeBilinear(photoImg, 360, 270);
+    }
+    gl::initTextureRenderer();
+    gl::Texture photoTex = gl::createTexture(photoImg);
+    gl::Texture fontTex  = gl::createTexture(buildFontAtlas(), true);   // NEAREST keeps pixels crisp
+    // Date stamp text = today's date (computer clock), formatted YYYY-MM-DD
+    std::string stampText;
+    {
+        std::time_t now = std::time(nullptr);
+        std::tm local{};
+#ifdef _WIN32
+        localtime_s(&local, &now);
+#else
+        localtime_r(&now, &local);
+#endif
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d", local.tm_year + 1900, local.tm_mon + 1, local.tm_mday);
+        stampText = buf;
+    }
+    FilterParams photoFilter;
+    photoFilter.kind = FILTER_SEPIA;
+    photoFilter.strength = 1.0f;
+
     int currentMode = 0; // 0: Triangle, 1: Day page fallback, 2: Calendar fallback, 3: Hardware polygons
     double elapsedAnim = 0.0;
 
     gl::WindowCallbacks cb;
     cb.onResize = [](int w, int h) {
         gl::setProjection(w, h);
+        gl::setTextureProjection(w, h);
     };
 
-    cb.onKey = [&currentMode](int key, int action) {
+    cb.onKey = [&currentMode, &photoFilter](int key, int action) {
+        if (action == 1 || action == 2) { // GLFW_PRESS / REPEAT
+            if (key == 265) photoFilter.strength = std::min(1.0f, photoFilter.strength + 0.1f);   // Up
+            if (key == 264) photoFilter.strength = std::max(0.0f, photoFilter.strength - 0.1f);   // Down
+        }
         if (action == 1) { // GLFW_PRESS
+            if (key == 70) photoFilter.kind = (FilterKind)((photoFilter.kind + 1) % FILTER_COUNT); // F
             if (key == 49) currentMode = 0;                          // '1'
             else if (key == 50) currentMode = 1;                     // '2'
             else if (key == 51) currentMode = 2;                     // '3'
             else if (key == 52) currentMode = 3;                     // '4'
-            else if (key == 32) currentMode = (currentMode + 1) % 4; // Space
+            else if (key == 53) currentMode = 4;                     // '5'
+            else if (key == 32) currentMode = (currentMode + 1) % 5; // Space
         }
     };
 
@@ -1163,11 +1209,43 @@ int main(int argc, char* argv[]) {
             Polygon heart = makeHeart({0, 0}, 80);
             gl::drawPolygon(heart, heartTransform, {230, 50, 90, 220});
             gl::drawPolyline(heart, heartTransform, {120, 20, 50, 255});
+        } else if (currentMode == 4) {
+            // Option 3: textured, filtered photo + translucent tape + date stamp.
+            // The photo is a base element placed by our own Mat3; the filter maths run in the fragment shader.
+            Mat3 photoM = Mat3::translate(260, 90) * Mat3::rotate(-0.05);
+            gl::drawTexture(photoTex, photoM, 1.0f, photoFilter);
+
+            // Same photo again as a 60% translucent sticker with a different filter (Final Project: filters on stickers)
+            FilterParams grey; grey.kind = FILTER_GRAYSCALE; grey.strength = 1.0f;
+            gl::drawTexture(photoTex, Mat3::translate(70, 330) * Mat3::rotate(0.12) * Mat3::scale(0.35, 0.35), 0.6f, grey);
+
+            // Washi tape: translucent pink polygon, straight-alpha source-over blending
+            Polygon tape = makeRibbon({0, 0}, 130, 34, 6);
+            gl::drawPolygon(tape, Mat3::translate(300, 96) * Mat3::rotate(-0.45), {255, 150, 190, 150});
+            gl::drawPolygon(tape, Mat3::translate(600, 330) * Mat3::rotate(0.5),  {140, 210, 190, 150});
+
+            // A sticker and the date stamp
+            gl::drawPolygon(makeStar({0, 0}, 50, 22), Mat3::translate(640, 120) * Mat3::rotate(elapsedAnim * 0.6), {255, 200, 0, 230});
+            Polygon stamp = makeDateStamp({0, 0}, 200, 50, 8);
+            Mat3 stampM = Mat3::translate(560, 500) * Mat3::rotate(-0.06);
+            gl::drawPolygon(stamp, stampM, {250, 240, 215, 255});
+            gl::drawPolyline(stamp, stampM, {150, 80, 60, 255});
+            gl::drawStampText(fontTex, stampText, -88, -9, 3.0f, {150, 50, 40, 255}, stampM);
+
+            // Print the active filter when it changes
+            static int lastKind = -1; static float lastStrength = -1;
+            if (lastKind != (int)photoFilter.kind || lastStrength != photoFilter.strength) {
+                std::cout << "Photo filter: " << filterName(photoFilter.kind) << "  strength " << photoFilter.strength << "\n";
+                lastKind = (int)photoFilter.kind; lastStrength = photoFilter.strength;
+            }
         }
     };
 
     gl::runLoop(window, cb);
 
+    gl::deleteTexture(photoTex);
+    gl::deleteTexture(fontTex);
+    gl::shutdownTextureRenderer();
     gl::shutdownRenderer();
     gl::destroyWindow(window);
     return 0;
