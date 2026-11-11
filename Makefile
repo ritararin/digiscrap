@@ -1,23 +1,54 @@
 CXX ?= g++
 CXXFLAGS ?= -std=c++17 -O2 -Wall
-CPPFLAGS += -Isrc -D_USE_MATH_DEFINES
+CPPFLAGS += -Isrc -Iextern/glad/include -D_USE_MATH_DEFINES
 
 MODULE_SRC = src/lines/lines.cpp src/polygons/polygons.cpp \
              src/clipping/clipping.cpp src/circles/circles.cpp \
              src/curves/curves.cpp src/colour/colour.cpp \
+             src/easing/easing.cpp src/paths/paths.cpp \
              src/transitions/transitions.cpp
 
 ANIM_SRC = src/animation/exporter.cpp src/animation/demo_sequences.cpp
 STICKER_SRC = src/stickers/demo_drag.cpp
+GL_SRC = extern/glad/src/glad.c src/opengl/window.cpp src/opengl/shader.cpp src/opengl/renderer.cpp
 
-HEADERS = $(wildcard src/*/*.h)
+HEADERS = $(wildcard src/*/*.h) $(wildcard src/opengl/*.h)
+
+ifeq ($(OS),Windows_NT)
+  GL_LIBS = -lglfw3 -lopengl32 -lgdi32
+  MKDIR_OUTPUT = if not exist output mkdir output
+  RUN_SCRAPBOOK = scrapbook.exe
+  RUN_POLYGONS = polygons_test.exe
+  RUN_CLIPPING = clipping_colour_test.exe
+  RUN_LINES_CIRCLES = lines_circles_test.exe
+  RUN_ANIM = animation_test.exe
+  RUN_STICKER = sticker_test.exe
+  RUN_EASING = easing_paths_test.exe
+  RUN_OPENGL = opengl_test.exe
+else
+  UNAME_S := $(shell uname -s)
+  ifeq ($(UNAME_S),Darwin)
+    GL_LIBS = -lglfw -framework OpenGL -framework Cocoa -framework IOKit -framework CoreVideo
+  else
+    GL_LIBS = -lglfw -lGL -lX11 -lpthread -lXrandr -lXi -ldl
+  endif
+  MKDIR_OUTPUT = mkdir -p output
+  RUN_SCRAPBOOK = ./scrapbook
+  RUN_POLYGONS = ./polygons_test
+  RUN_CLIPPING = ./clipping_colour_test
+  RUN_LINES_CIRCLES = ./lines_circles_test
+  RUN_ANIM = ./animation_test
+  RUN_STICKER = ./sticker_test
+  RUN_EASING = ./easing_paths_test
+  RUN_OPENGL = ./opengl_test
+endif
 
 .PHONY: all run test clean
 
-all: scrapbook polygons_test clipping_colour_test lines_circles_test animation_test sticker_test
+all: scrapbook polygons_test clipping_colour_test lines_circles_test animation_test sticker_test easing_paths_test opengl_test
 
-scrapbook: src/main.cpp $(MODULE_SRC) $(ANIM_SRC) $(STICKER_SRC) $(HEADERS)
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) src/main.cpp $(MODULE_SRC) $(ANIM_SRC) $(STICKER_SRC) -o $@
+scrapbook: src/main.cpp $(MODULE_SRC) $(ANIM_SRC) $(STICKER_SRC) $(GL_SRC) $(HEADERS)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) src/main.cpp $(MODULE_SRC) $(ANIM_SRC) $(STICKER_SRC) $(GL_SRC) $(GL_LIBS) -o $@
 
 polygons_test: src/polygons/test_polygons.cpp $(MODULE_SRC) $(HEADERS)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) src/polygons/test_polygons.cpp $(MODULE_SRC) -o $@
@@ -34,36 +65,30 @@ animation_test: src/animation/test_animation_core.cpp src/animation/exporter.cpp
 sticker_test: src/stickers/test_stickers.cpp src/polygons/polygons.cpp src/lines/lines.cpp $(HEADERS)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) src/stickers/test_stickers.cpp src/polygons/polygons.cpp src/lines/lines.cpp -o $@
 
-ifeq ($(OS),Windows_NT)
-  MKDIR_OUTPUT = if not exist output mkdir output
-  RUN_SCRAPBOOK = scrapbook.exe
-  RUN_POLYGONS = polygons_test.exe
-  RUN_CLIPPING = clipping_colour_test.exe
-  RUN_LINES_CIRCLES = lines_circles_test.exe
-  RUN_ANIM = animation_test.exe
-  RUN_STICKER = sticker_test.exe
-else
-  MKDIR_OUTPUT = mkdir -p output
-  RUN_SCRAPBOOK = ./scrapbook
-  RUN_POLYGONS = ./polygons_test
-  RUN_CLIPPING = ./clipping_colour_test
-  RUN_LINES_CIRCLES = ./lines_circles_test
-  RUN_ANIM = ./animation_test
-  RUN_STICKER = ./sticker_test
-endif
+easing_paths_test: src/easing/test_easing_paths.cpp $(MODULE_SRC) $(HEADERS)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) src/easing/test_easing_paths.cpp $(MODULE_SRC) -o $@
+
+opengl_test: src/opengl/test_opengl.cpp $(GL_SRC) $(MODULE_SRC) $(HEADERS)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) src/opengl/test_opengl.cpp $(GL_SRC) $(MODULE_SRC) $(GL_LIBS) -o $@
 
 run: scrapbook
 	$(MKDIR_OUTPUT)
 	$(RUN_SCRAPBOOK)
 
-test: polygons_test clipping_colour_test lines_circles_test animation_test sticker_test
+test: polygons_test clipping_colour_test lines_circles_test animation_test sticker_test easing_paths_test opengl_test
 	$(MKDIR_OUTPUT)
 	$(RUN_POLYGONS)
 	$(RUN_CLIPPING)
 	$(RUN_LINES_CIRCLES)
 	$(RUN_ANIM)
 	$(RUN_STICKER)
+	$(RUN_EASING)
+	$(RUN_OPENGL)
 
 clean:
-	rm -f scrapbook polygons_test clipping_colour_test lines_circles_test animation_test sticker_test \
-	      scrapbook.exe polygons_test.exe clipping_colour_test.exe lines_circles_test.exe animation_test.exe sticker_test.exe
+ifeq ($(OS),Windows_NT)
+	-cmd /c del /f /q scrapbook.exe polygons_test.exe clipping_colour_test.exe lines_circles_test.exe animation_test.exe sticker_test.exe easing_paths_test.exe opengl_test.exe 2>nul
+else
+	rm -f scrapbook polygons_test clipping_colour_test lines_circles_test animation_test sticker_test easing_paths_test opengl_test \
+	      scrapbook.exe polygons_test.exe clipping_colour_test.exe lines_circles_test.exe animation_test.exe sticker_test.exe easing_paths_test.exe opengl_test.exe
+endif
