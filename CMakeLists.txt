@@ -50,6 +50,9 @@ add_library(scrapbook_modules
     src/animation/exporter.cpp
     src/animation/demo_sequences.cpp
     src/stickers/demo_drag.cpp
+    src/textures/image_loader.cpp
+    src/textures/font_atlas.cpp
+    src/textures/filter_mirror.cpp
 )
 target_include_directories(scrapbook_modules PUBLIC src)
 target_compile_definitions(scrapbook_modules PUBLIC _USE_MATH_DEFINES)
@@ -59,6 +62,7 @@ add_library(opengl_renderer STATIC
     src/opengl/window.cpp
     src/opengl/shader.cpp
     src/opengl/renderer.cpp
+    src/opengl/texture_renderer.cpp
 )
 target_include_directories(opengl_renderer PUBLIC src extern/glad/include)
 target_link_libraries(opengl_renderer PUBLIC glad glfw OpenGL::GL scrapbook_modules)
@@ -86,6 +90,9 @@ target_link_libraries(sticker_test PRIVATE scrapbook_modules)
 add_executable(easing_paths_test src/easing/test_easing_paths.cpp)
 target_link_libraries(easing_paths_test PRIVATE scrapbook_modules)
 
+add_executable(textures_test src/textures/test_textures.cpp)
+target_link_libraries(textures_test PRIVATE scrapbook_modules)
+
 add_executable(opengl_test src/opengl/test_opengl.cpp)
 target_link_libraries(opengl_test PRIVATE opengl_renderer scrapbook_modules)
 
@@ -99,14 +106,15 @@ add_test(NAME lines_circles COMMAND lines_circles_test)
 add_test(NAME animation COMMAND animation_test)
 add_test(NAME stickers COMMAND sticker_test)
 add_test(NAME easing_paths COMMAND easing_paths_test)
+add_test(NAME textures COMMAND textures_test)
 add_test(NAME opengl COMMAND opengl_test)
 
-set_tests_properties(polygons clipping_colour lines_circles animation stickers easing_paths opengl PROPERTIES
+set_tests_properties(polygons clipping_colour lines_circles animation stickers easing_paths textures opengl PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_custom_target(check
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C $<CONFIG>
-    DEPENDS polygons_test clipping_colour_test lines_circles_test animation_test sticker_test easing_paths_test opengl_test
+    DEPENDS polygons_test clipping_colour_test lines_circles_test animation_test sticker_test easing_paths_test textures_test opengl_test
     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 add_custom_target(run
