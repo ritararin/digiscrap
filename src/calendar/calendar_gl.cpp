@@ -11,8 +11,10 @@
 #include "animation/lerp.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <iostream>
 
 #ifndef M_PI
@@ -138,6 +140,36 @@ const char* shortFilterLabel(int kind) {
         case 6: return "INVERT";
         default: return "NORMAL";
     }
+}
+
+bool isSupportedNoteChar(char c) {
+    unsigned char uc = (unsigned char)c;
+    if (std::isalnum(uc)) return true;
+    switch (c) {
+        case ' ': case '-': case '.': case ',':
+        case '!': case '?': case '\'': case ':': case '/':
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Wrap a sentence into at most 2 lines of `maxCols` characters each, breaking on spaces when possible.
+std::pair<std::string, std::string> wrapTwoLines(const std::string& text, size_t maxCols = 52) {
+    if (text.size() <= maxCols) {
+        return {text, ""};
+    }
+    size_t splitPos = text.rfind(' ', maxCols);
+    if (splitPos == std::string::npos || splitPos < maxCols / 2) {
+        splitPos = maxCols;
+    }
+    std::string line1 = text.substr(0, splitPos);
+    size_t start2 = (splitPos < text.size() && text[splitPos] == ' ') ? (splitPos + 1) : splitPos;
+    std::string line2 = text.substr(start2);
+    if (line2.size() > maxCols) {
+        line2 = line2.substr(0, maxCols);
+    }
+    return {line1, line2};
 }
 
 } // namespace
@@ -310,20 +342,45 @@ void CalendarScrapbookApp::init(const gl::Texture& photoTex, const gl::Texture& 
     }
 
     currentDay_ = loadOrCreateDay(calLayout_.year, calLayout_.month, highlightedDay_);
+    syncCustomPhotoTexture(currentDay_);
     refreshMonthThumbnails();
 }
 
 void CalendarScrapbookApp::shutdown() {
     clearMonthThumbnails();
+    if (customDayTex_.id != 0) {
+        gl::deleteTexture(customDayTex_);
+    }
+    customDayTexPath_.clear();
     for (auto& tex : themePhotos_) {
         gl::deleteTexture(tex);
     }
 }
 
+void CalendarScrapbookApp::syncCustomPhotoTexture(const DayLayout& layout) {
+    if (!fontTex_.id && !photoTex_.id) return;
+    if (!isCustomPhotoPath(layout.photoPath)) {
+        return;
+    }
+    if (customDayTex_.id != 0 && customDayTexPath_ == layout.photoPath) {
+        return;
+    }
+    Framebuffer fb = resolveDayPhoto(layout, 360, 270);
+    if (customDayTex_.id != 0) {
+        gl::deleteTexture(customDayTex_);
+    }
+    customDayTex_     = gl::createTexture(fb, false);
+    customDayTexPath_ = layout.photoPath;
+}
+
 const gl::Texture& CalendarScrapbookApp::textureForDay(const DayLayout& layout) const {
-    if (!layout.photoPath.empty() && layout.photoPath != "demo" &&
-        layout.photoPath.rfind("theme:", 0) != 0 && photoTex_.id != 0) {
-        return photoTex_;
+    if (isCustomPhotoPath(layout.photoPath)) {
+        if (customDayTex_.id != 0 && customDayTexPath_ == layout.photoPath) {
+            return customDayTex_;
+        }
+        if (photoTex_.id != 0) {
+            return photoTex_;
+        }
     }
     int theme = parsePhotoTheme(layout.photoPath, layout.day);
     if (themePhotos_[theme].id != 0) {
@@ -395,6 +452,56 @@ void CalendarScrapbookApp::cycleDayPhotoTheme() {
     saveCurrentDay();
 }
 
+bool CalendarScrapbookApp::setCustomPhotoFromFile(const std::string& srcFilePath) {
+    if (srcFilePath.empty()) return false;
+    std::string destBmp = customPhotoSavePath(saveDir_, currentDay_.year, currentDay_.month, currentDay_.day);
+    Framebuffer imported(1, 1);
+    if (!importUserPhotoFile(srcFilePath, destBmp, imported, 360, 270)) {
+        std::cerr << "[Option 5] Could not load image file: " << srcFilePath << "\n";
+        return false;
+    }
+    currentDay_.photoPath = destBmp;
+    if (fontTex_.id != 0 || photoTex_.id != 0) {
+        if (customDayTex_.id != 0) {
+            gl::deleteTexture(customDayTex_);
+        }
+        customDayTex_     = gl::createTexture(imported, false);
+        customDayTexPath_ = destBmp;
+    }
+    saveCurrentDay();
+    std::cout << "[Option 5] Added custom photo for Day " << currentDay_.day
+              << " -> " << destBmp << "\n";
+    return true;
+}
+
+bool CalendarScrapbookApp::promptAndUploadPhoto() {
+    std::string chosen = openPhotoFileDialog();
+    if (chosen.empty()) return false;
+    return setCustomPhotoFromFile(chosen);
+}
+
+void CalendarScrapbookApp::setEditingDescription(bool editing) {
+    if (editingNote_ != editing) {
+        editingNote_ = editing;
+        if (!editingNote_) {
+            saveCurrentDay();
+        }
+    }
+}
+
+void CalendarScrapbookApp::setDayDescription(const std::string& text) {
+    std::string cleaned;
+    cleaned.reserve(text.size());
+    for (char c : text) {
+        char up = (char)std::toupper((unsigned char)c);
+        if (isSupportedNoteChar(up) && cleaned.size() < 104) {
+            cleaned.push_back(up);
+        }
+    }
+    currentDay_.description = cleaned;
+    saveCurrentDay();
+}
+
 void CalendarScrapbookApp::selectDayOnCalendar(int day, bool openAfterMove) {
     day = std::clamp(day, 1, calLayout_.daysInMonth);
     if (day == highlightedDay_) {
@@ -417,8 +524,10 @@ void CalendarScrapbookApp::openDayPage(int day, bool withPageTurn) {
 
     highlightedDay_ = day;
     currentDay_     = loadOrCreateDay(calLayout_.year, calLayout_.month, day);
+    syncCustomPhotoTexture(currentDay_);
     selectedElem_   = -1;
     dragging_       = false;
+    editingNote_    = false;
 
     saveCurrentDay();
 
@@ -448,6 +557,7 @@ void CalendarScrapbookApp::returnToCalendar(bool withPageTurn) {
         view_         = VIEW_CALENDAR;
         selectedElem_ = -1;
         dragging_     = false;
+        editingNote_  = false;
     }
 }
 
@@ -541,35 +651,76 @@ void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, doub
     }
 
     // ---- VIEW_DAY_PAGE top toolbar buttons ----
-    if (insideRect(mx, my, 74, 38, 194, 68)) {
+    if (insideRect(mx, my, 74, 38, 178, 68)) {
+        editingNote_ = false;
         returnToCalendar(true);
         return;
     }
-    if (insideRect(mx, my, 202, 38, 278, 68)) {
+    if (insideRect(mx, my, 184, 38, 250, 68)) {
+        editingNote_ = false;
         int prevDay = (highlightedDay_ > 1) ? (highlightedDay_ - 1) : calLayout_.daysInMonth;
         openDayPage(prevDay, true);
         return;
     }
-    if (insideRect(mx, my, 284, 38, 360, 68)) {
+    if (insideRect(mx, my, 256, 38, 322, 68)) {
+        editingNote_ = false;
         int nextDay = (highlightedDay_ < calLayout_.daysInMonth) ? (highlightedDay_ + 1) : 1;
         openDayPage(nextDay, true);
         return;
     }
-    if (insideRect(mx, my, 368, 38, 462, 68)) {
+    if (insideRect(mx, my, 328, 38, 434, 68)) {
+        editingNote_ = false;
+        promptAndUploadPhoto();
+        return;
+    }
+    if (insideRect(mx, my, 440, 38, 514, 68)) {
+        editingNote_ = false;
         cycleDayPhotoTheme();
         return;
     }
-    if (insideRect(mx, my, 470, 38, 572, 68)) {
+    if (insideRect(mx, my, 520, 38, 598, 68)) {
+        editingNote_ = false;
         onKey(70, 1); // 'F' cycle filter
         return;
     }
-    if (insideRect(mx, my, 580, 38, 686, 68)) {
+    if (insideRect(mx, my, 604, 38, 690, 68)) {
+        editingNote_ = false;
         onKey(65, 1); // 'A' add sticker
         return;
     }
-    if (insideRect(mx, my, 694, 38, 758, 68)) {
+    if (insideRect(mx, my, 696, 38, 758, 68)) {
+        editingNote_ = false;
         triggerDropAnimation(-1);
         return;
+    }
+
+    // ---- Polaroid "UPLOAD" mini button (bottom-right of Polaroid frame) ----
+    if (insideRect(mx, my, 366, 398, 448, 424)) {
+        editingNote_ = false;
+        promptAndUploadPhoto();
+        return;
+    }
+
+    // ---- Daily Memory Sentence Description Box (x = 102..748, y = 442..526) ----
+    if (insideRect(mx, my, 102, 442, 748, 526)) {
+        // Check if "CLEAR" mini button inside description box was clicked
+        if (insideRect(mx, my, 672, 446, 742, 468)) {
+            currentDay_.description.clear();
+            editingNote_ = true;
+            selectedElem_ = -1;
+            saveCurrentDay();
+            return;
+        }
+        editingNote_  = true;
+        selectedElem_ = -1;
+        dragging_     = false;
+        return;
+    }
+
+    // Clicking outside the description box finishes note editing
+    if (editingNote_) {
+        editingNote_ = false;
+        saveCurrentDay();
     }
 
     // Hit-test stickers front-to-back using inverseMatrix() and pointInPolygon()
@@ -639,9 +790,40 @@ void CalendarScrapbookApp::onKey(int key, int action) {
         return;
     }
 
+    // ---- VIEW_DAY_PAGE: If actively typing in the sentence description box ----
+    if (editingNote_) {
+        if (key == 259) { // Backspace -> delete last character
+            if (!currentDay_.description.empty()) {
+                currentDay_.description.pop_back();
+                saveCurrentDay();
+            }
+            return;
+        }
+        if (key == 261) { // Delete -> clear sentence
+            currentDay_.description.clear();
+            saveCurrentDay();
+            return;
+        }
+        if (key == 257 || key == 335 || key == 258) { // Enter or Tab -> finish editing sentence
+            editingNote_ = false;
+            saveCurrentDay();
+            return;
+        }
+        return; // Ignore single-key shortcuts while typing a sentence
+    }
+
     // ---- VIEW_DAY_PAGE keys ----
     if (key == 66 || key == 258) { // 'B' or Tab -> Back to Calendar
         returnToCalendar(true);
+        return;
+    }
+    if (key == 84 || key == 257 || key == 335) { // 'T' or Enter -> Edit daily sentence description
+        editingNote_  = true;
+        selectedElem_ = -1;
+        return;
+    }
+    if (key == 85) { // 'U' -> Upload your own picture from file dialog
+        promptAndUploadPhoto();
         return;
     }
     if (key == 78) { // 'N' -> Next day page-turn
@@ -732,6 +914,29 @@ void CalendarScrapbookApp::onKey(int key, int action) {
         }
         if (changed) saveCurrentDay();
     }
+}
+
+void CalendarScrapbookApp::onChar(unsigned int codepoint) {
+    if (view_ != VIEW_DAY_PAGE || !editingNote_) return;
+    if (codepoint < 32 || codepoint > 126) return;
+
+    char c = (char)std::toupper((unsigned char)codepoint);
+    if (!isSupportedNoteChar(c)) return;
+    if (currentDay_.description.size() >= 104) return;
+
+    currentDay_.description.push_back(c);
+    saveCurrentDay();
+}
+
+void CalendarScrapbookApp::onDropFile(const std::string& filePath) {
+    if (filePath.empty()) return;
+    if (view_ == VIEW_CALENDAR) {
+        int targetDay = (hoveredDay_ >= 1 && hoveredDay_ <= calLayout_.daysInMonth)
+                            ? hoveredDay_
+                            : highlightedDay_;
+        openDayPage(targetDay, false);
+    }
+    setCustomPhotoFromFile(filePath);
 }
 
 // ---------------------------------------------------------------------------
@@ -950,17 +1155,18 @@ void CalendarScrapbookApp::renderDayPageView(const DayLayout& layout, bool apply
     renderNotebookShell();
 
     // 1. Top Cohesive Toolbar with Hover States (crisp integer scale = 2)
-    drawButtonGL(fontTex_,  74, 38, 194, 68, "CALENDAR", kGreen,      kWhite, insideRect(mouseX_, mouseY_,  74, 38, 194, 68));
-    drawButtonGL(fontTex_, 202, 38, 278, 68, "PREV",     kPaper,      kDark,  insideRect(mouseX_, mouseY_, 202, 38, 278, 68));
-    drawButtonGL(fontTex_, 284, 38, 360, 68, "NEXT",     kPaper,      kDark,  insideRect(mouseX_, mouseY_, 284, 38, 360, 68));
-    drawButtonGL(fontTex_, 368, 38, 462, 68, "PHOTO",    kHoney,      kDark,  insideRect(mouseX_, mouseY_, 368, 38, 462, 68));
-    drawButtonGL(fontTex_, 470, 38, 572, 68, "FILTER",   kSage,       kDark,  insideRect(mouseX_, mouseY_, 470, 38, 572, 68));
-    drawButtonGL(fontTex_, 580, 38, 686, 68, "STICKER",  kMustard,    kDark,  insideRect(mouseX_, mouseY_, 580, 38, 686, 68));
-    drawButtonGL(fontTex_, 694, 38, 758, 68, "DROP",     kTerracotta, kWhite, insideRect(mouseX_, mouseY_, 694, 38, 758, 68));
+    drawButtonGL(fontTex_,  74, 38, 178, 68, "CALENDAR",  kGreen,      kWhite, insideRect(mouseX_, mouseY_,  74, 38, 178, 68));
+    drawButtonGL(fontTex_, 184, 38, 250, 68, "PREV",      kPaper,      kDark,  insideRect(mouseX_, mouseY_, 184, 38, 250, 68));
+    drawButtonGL(fontTex_, 256, 38, 322, 68, "NEXT",      kPaper,      kDark,  insideRect(mouseX_, mouseY_, 256, 38, 322, 68));
+    drawButtonGL(fontTex_, 328, 38, 434, 68, "ADD PHOTO", kTerracotta, kWhite, insideRect(mouseX_, mouseY_, 328, 38, 434, 68));
+    drawButtonGL(fontTex_, 440, 38, 514, 68, "SCENE",     kHoney,      kDark,  insideRect(mouseX_, mouseY_, 440, 38, 514, 68));
+    drawButtonGL(fontTex_, 520, 38, 598, 68, "FILTER",    kSage,       kDark,  insideRect(mouseX_, mouseY_, 520, 38, 598, 68));
+    drawButtonGL(fontTex_, 604, 38, 690, 68, "STICKER",   kMustard,    kDark,  insideRect(mouseX_, mouseY_, 604, 38, 690, 68));
+    drawButtonGL(fontTex_, 696, 38, 758, 68, "DROP",      kGreen,      kWhite, insideRect(mouseX_, mouseY_, 696, 38, 758, 68));
 
-    // 2. Left Side: Polaroid Photo Card with This Day's Distinct Photograph
-    drawRectGL(110, 92, 466, 456, Color{64, 58, 48, 75});
-    drawRectGL(102, 84, 458, 448, kWhite, kBrown);
+    // 2. Left Side: Polaroid Photo Card with User's Own Photo or Daily Scene
+    drawRectGL(110, 90, 464, 434, Color{64, 58, 48, 75});
+    drawRectGL(102, 82, 456, 428, kWhite, kBrown);
 
     const gl::Texture& dayTex = textureForDay(layout);
     if (dayTex.id != 0) {
@@ -969,33 +1175,83 @@ void CalendarScrapbookApp::renderDayPageView(const DayLayout& layout, bool apply
         fp.strength = layout.filterStrength;
         fp.amount   = (fp.kind == FILTER_CONTRAST) ? 1.45f : 0.18f;
         fp.tint     = {235, 165, 120, 255};
-        Mat3 photoM = Mat3::translate(118.0, 98.0)
-                    * Mat3::scale(324.0 / (double)dayTex.width,
-                                  264.0 / (double)dayTex.height);
+        Mat3 photoM = Mat3::translate(118.0, 96.0)
+                    * Mat3::scale(322.0 / (double)dayTex.width,
+                                  256.0 / (double)dayTex.height);
         gl::drawTexture(dayTex, photoM, 1.0f, fp);
     }
-    gl::drawPolyline(rectPoly(118, 98, 442, 362), Mat3::identity(), kDark);
+    gl::drawPolyline(rectPoly(118, 96, 440, 352), Mat3::identity(), kDark);
 
-    // Polaroid Bottom Caption Area (Scene Title at scale=3 + Date/Filter at scale=2)
+    // Polaroid Bottom Caption Area + Quick "UPLOAD" button
+    bool hasCustom = isCustomPhotoPath(layout.photoPath);
     int theme = parsePhotoTheme(layout.photoPath, layout.day);
-    std::string sceneTitle = photoThemeCaption(theme);
-    drawCrispTextCentered(fontTex_, sceneTitle, 280, 388, 3, kDark, true, kCream);
+    std::string sceneTitle = hasCustom ? "MY PHOTO MEMORY" : photoThemeCaption(theme);
+    drawCrispTextCentered(fontTex_, sceneTitle, 240, 372, 3, kDark, true, kCream);
 
-    std::string subCaption = layout.dateText + "   FILTER " + shortFilterLabel(layout.photoFilter);
-    drawCrispTextCentered(fontTex_, subCaption, 280, 422, 2, kBrown);
+    std::string subCaption = layout.dateText + "  " + shortFilterLabel(layout.photoFilter);
+    drawCrispText(fontTex_, subCaption, 118, 405, 2, kBrown);
+
+    drawButtonGL(fontTex_, 366, 398, 448, 424, "UPLOAD", kPaper, kDark,
+                 insideRect(mouseX_, mouseY_, 366, 398, 448, 424));
 
     // 3. Right Side: Lined Journal Note Card Backdrop for Stickers
-    drawRectGL(482, 92, 754, 424, Color{64, 58, 48, 55});
-    drawRectGL(476, 86, 748, 418, kPaper, kBrown);
+    drawRectGL(482, 90, 754, 434, Color{64, 58, 48, 55});
+    drawRectGL(476, 82, 748, 428, kPaper, kBrown);
     // Red vertical margin line & horizontal ruled notebook lines
-    drawRectGL(506, 86, 508, 418, Color{216, 130, 118, 160});
-    for (int ry = 132; ry <= 396; ry += 24) {
+    drawRectGL(506, 82, 508, 428, Color{216, 130, 118, 160});
+    for (int ry = 128; ry <= 408; ry += 24) {
         drawRectGL(478, ry, 746, ry + 1, Color{195, 205, 215, 160});
     }
-    std::string noteHdr = "DAY " + std::to_string(layout.day) + " JOURNAL";
-    drawCrispTextCentered(fontTex_, noteHdr, 612, 108, 2, kDeepGreen, true, kWhite);
+    std::string noteHdr = "DAY " + std::to_string(layout.day) + " STICKER BOARD";
+    drawCrispTextCentered(fontTex_, noteHdr, 612, 102, 2, kDeepGreen, true, kWhite);
 
-    // 4. Z-ordered Stickers, Washi Tape & Notched Date Stamp with Live Drop-and-Settle
+    // 4. Sentence-Long Daily Description Box (x = 102..748, y = 442..526)
+    bool descHover = insideRect(mouseX_, mouseY_, 102, 442, 748, 526);
+    drawRectGL(108, 448, 754, 532, Color{64, 58, 48, 55});
+    Color descBg   = editingNote_ ? kWhite : kPaper;
+    Color descEdge = editingNote_ ? kTerracotta : (descHover ? kMustard : kBrown);
+    drawRectGL(102, 442, 748, 526, descBg, descEdge);
+    if (editingNote_) {
+        gl::drawPolyline(rectPoly(103, 443, 747, 525), Mat3::identity(), kTerracotta);
+    }
+
+    // Header strip inside description card
+    drawRectGL(103, 443, 747, 470, editingNote_ ? Color{249, 205, 125, 165} : Color{246, 224, 184, 180});
+    std::string descHdr = editingNote_
+                              ? "DAILY MEMORY DESCRIPTION - TYPING (ENTER WHEN DONE)"
+                              : "DAILY MEMORY DESCRIPTION - CLICK HERE OR PRESS T TO WRITE";
+    drawCrispText(fontTex_, descHdr, 114, 452, 2, editingNote_ ? kTerracotta : kDeepGreen);
+
+    // Mini "CLEAR" button on right of description header
+    drawButtonGL(fontTex_, 672, 446, 742, 468, "CLEAR", kWhite, kDark,
+                 insideRect(mouseX_, mouseY_, 672, 446, 742, 468));
+
+    // Ruled lines for the 2-line sentence area
+    drawRectGL(112, 494, 738, 495, Color{195, 205, 215, 180});
+    drawRectGL(112, 516, 738, 517, Color{195, 205, 215, 180});
+
+    std::string shownText = layout.description;
+    if (shownText.empty() && !editingNote_) {
+        drawCrispText(fontTex_, "CLICK HERE TO ADD A SHORT DESCRIPTION FOR THIS DAY...",
+                      116, 480, 2, kBrown);
+    } else {
+        auto [line1, line2] = wrapTwoLines(shownText, 52);
+        drawCrispText(fontTex_, line1, 116, 480, 2, kDark);
+        if (!line2.empty()) {
+            drawCrispText(fontTex_, line2, 116, 502, 2, kDark);
+        }
+
+        // Blinking text cursor when editing
+        if (editingNote_ && std::fmod(pulseClock_, 1.0) < 0.55) {
+            bool onSecondLine = !line2.empty() || (line1.size() >= 52);
+            const std::string& curLine = onSecondLine ? line2 : line1;
+            double cx = 116.0 + crispTextWidth(curLine, 2) + 3.0;
+            double cy = onSecondLine ? 500.0 : 478.0;
+            drawRectGL(cx, cy, cx + 3.0, cy + 13.0, kTerracotta);
+        }
+    }
+
+    // 5. Z-ordered Stickers, Washi Tape & Notched Date Stamp with Live Drop-and-Settle
     double dropT = (applyDropAnim && dropAnim_.active)
                        ? easing::clamp01(dropAnim_.elapsed / dropAnim_.duration)
                        : 1.0;
@@ -1048,11 +1304,12 @@ void CalendarScrapbookApp::renderDayPageView(const DayLayout& layout, bool apply
         }
     }
 
-    // 5. Cohesive Bottom Status Ribbon (crisp integer scale = 2)
+    // 6. Cohesive Bottom Status Ribbon (crisp integer scale = 2)
     drawRectGL(74, 536, 756, 560, kDeepGreen, kBrown);
-    drawCrispTextCentered(fontTex_,
-                          "DRAG STICKER   Q E ROTATE   C PHOTO   F FILTER   B CALENDAR",
-                          415, 548, 2, kWhite, true, kDark);
+    std::string statusMsg = editingNote_
+        ? "TYPE YOUR SENTENCE   BACKSPACE DELETE   ENTER FINISH   AUTOMATICALLY SAVED"
+        : "U ADD PHOTO   T WRITE DESCRIPTION   DRAG STICKER   F FILTER   B CALENDAR";
+    drawCrispTextCentered(fontTex_, statusMsg, 415, 548, 2, kWhite, true, kDark);
 }
 
 void CalendarScrapbookApp::renderPageTurnOverlay() {

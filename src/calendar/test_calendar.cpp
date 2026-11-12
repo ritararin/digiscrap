@@ -52,10 +52,11 @@ static void testOption5StorageAndAnimations() {
     }
     CHECK(triAreaOk, "ear-clipping triangulateConcave area matches Shoelace polygonArea");
 
-    // 3. Save and load DayLayout round-trip to a text file
+    // 3. Save and load DayLayout round-trip to a text file (including sentence description)
     DayLayout orig = makeDefaultDayLayout(2026, 10, 14, "output/day_page.bmp");
     orig.photoFilter    = 2;
     orig.filterStrength = 0.75f;
+    orig.description    = "SUNNY WALK AT THE PARK, COFFEE & CROISSANTS AT 10:30!";
     // Perturb an element to test custom transform + z-order persistence
     orig.elements[0].xform.position = {333.5, 412.25};
     orig.elements[0].xform.rotation = -27.5;
@@ -70,6 +71,7 @@ static void testOption5StorageAndAnimations() {
     CHECK(loadDayLayout(tmpFile, loaded), "loadDayLayout parses saved text file");
     CHECK(loaded.year == 2026 && loaded.month == 10 && loaded.day == 14, "loaded date matches");
     CHECK(loaded.photoPath == "output/day_page.bmp", "loaded photoPath matches");
+    CHECK(loaded.description == orig.description, "loaded sentence description matches");
     CHECK(loaded.photoFilter == 2 && near(loaded.filterStrength, 0.75, 1e-3), "loaded filter matches");
     CHECK(loaded.elements.size() == orig.elements.size(), "loaded element count matches");
 
@@ -162,6 +164,14 @@ static void testOption5StorageAndAnimations() {
     const std::string testSaveDir = "output/test_saves_opt5";
     std::error_code ec;
     std::filesystem::remove_all(testSaveDir, ec);
+
+    // Create a sample user picture file to test uploading user's own photo
+    const std::string userPicFile = "output/test_user_upload.bmp";
+    {
+        Framebuffer userPic(120, 90, {40, 160, 220, 255});
+        userPic.saveBMP(userPicFile);
+    }
+
     {
         CalendarScrapbookApp app;
         app.init(gl::Texture{}, gl::Texture{}, testSaveDir, "demo");
@@ -176,15 +186,40 @@ static void testOption5StorageAndAnimations() {
         app.onKey(65, 1);
         CHECK(app.currentDayLayout().elements.size() == countBefore + 1,
               "pressing A adds a new sticker to the day page");
+
+        // Upload user's own photo file for Day 5
+        CHECK(app.setCustomPhotoFromFile(userPicFile),
+              "setCustomPhotoFromFile imports and saves user picture for Day 5");
+        CHECK(isCustomPhotoPath(app.currentDayLayout().photoPath),
+              "day 5 photoPath points to imported custom user picture");
+
+        // Click inside the sentence description box (x=250, y=490), clear it, and type a sentence
+        app.onMouseButton(0, 1, 700, 456); // Click "CLEAR" button inside description header
+        CHECK(app.isEditingDescription() && app.currentDayLayout().description.empty(),
+              "clicking CLEAR inside description box enters editing mode and clears note");
+        const std::string typedSentence = "Best trip to the beach!X";
+        for (char c : typedSentence) {
+            app.onChar((unsigned int)c);
+        }
+        app.onKey(259, 1); // Backspace removes trailing 'X'
+        app.onKey(257, 1); // Enter finishes editing
+        CHECK(!app.isEditingDescription() &&
+              app.currentDayLayout().description == "BEST TRIP TO THE BEACH!",
+              "typing sentence + Backspace + Enter updates and saves daily description");
     }
     {
-        // Reopen app and verify saved layout is restored from disk
+        // Reopen app and verify saved layout, custom photo, and sentence description are restored
         CalendarScrapbookApp app2;
         app2.init(gl::Texture{}, gl::Texture{}, testSaveDir, "demo");
         app2.openDayPage(5, false);
         CHECK(app2.currentDayLayout().elements.size() == 11,
               "reopening app restores saved layout with added sticker from disk");
+        CHECK(isCustomPhotoPath(app2.currentDayLayout().photoPath),
+              "reopening app restores user's custom uploaded photo path");
+        CHECK(app2.currentDayLayout().description == "BEST TRIP TO THE BEACH!",
+              "reopening app restores user's typed sentence description");
     }
+    std::remove(userPicFile.c_str());
     std::filesystem::remove_all(testSaveDir, ec);
 }
 

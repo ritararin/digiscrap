@@ -61,6 +61,8 @@ public:
     void onMouseButton(int button, int action, double mx, double my);
     void onCursorPos(double mx, double my);
     void onKey(int key, int action);
+    void onChar(unsigned int codepoint);
+    void onDropFile(const std::string& filePath);
 
     // Programmatic actions (useful for demos and tests).
     void selectDayOnCalendar(int day, bool openAfterMove = false);
@@ -68,6 +70,11 @@ public:
     void returnToCalendar(bool withPageTurn = true);
     void navigateMonth(int deltaMonths);
     void cycleDayPhotoTheme();
+    bool setCustomPhotoFromFile(const std::string& srcFilePath);
+    bool promptAndUploadPhoto();
+    void setEditingDescription(bool editing);
+    bool isEditingDescription() const { return editingNote_; }
+    void setDayDescription(const std::string& text);
     void triggerDropAnimation(int singleElementIndex = -1);
     bool saveCurrentDay();
 
@@ -104,6 +111,8 @@ private:
 
     gl::Texture photoTex_{};
     gl::Texture fontTex_{};
+    gl::Texture customDayTex_{};
+    std::string customDayTexPath_;
     std::array<gl::Texture, kNumPhotoThemes> themePhotos_{};
     std::string saveDir_          = "saves";
     std::string defaultPhotoPath_ = "demo";
@@ -119,6 +128,7 @@ private:
     DayLayout      currentDay_{};
     int            selectedElem_   = -1;
     bool           dragging_       = false;
+    bool           editingNote_    = false;
     Vec2           dragOffset_{0, 0};
 
     HighlightMoveState highlightAnim_{};
@@ -129,6 +139,7 @@ private:
     std::map<int, gl::Texture> monthThumbs_;
 
     const gl::Texture& textureForDay(const DayLayout& layout) const;
+    void syncCustomPhotoTexture(const DayLayout& layout);
     void refreshMonthThumbnails();
     void updateDayThumbnail(int day, const DayLayout& layout);
     void clearMonthThumbnails();

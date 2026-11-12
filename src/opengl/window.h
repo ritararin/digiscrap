@@ -19,6 +19,8 @@ struct WindowCallbacks {
     std::function<void(int key, int action)>                        onKey;         // key event
     std::function<void(int button, int action, double x, double y)> onMouseButton; // mouse button
     std::function<void(double x, double y)>                         onCursorPos;   // cursor position
+    std::function<void(unsigned int codepoint)>                     onChar;        // typed character
+    std::function<void(const std::string& filePath)>                onDrop;        // dropped file path
 };
 
 // Create the GLFW window + GL context.  Returns nullptr on failure.

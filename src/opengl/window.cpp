@@ -56,6 +56,16 @@ static void cursorPosCB(GLFWwindow* win, double mx, double my) {
     }
 }
 
+static void charCB(GLFWwindow*, unsigned int codepoint) {
+    if (g_callbacks && g_callbacks->onChar)
+        g_callbacks->onChar(codepoint);
+}
+
+static void dropCB(GLFWwindow*, int count, const char** paths) {
+    if (g_callbacks && g_callbacks->onDrop && count > 0 && paths && paths[0])
+        g_callbacks->onDrop(std::string(paths[0]));
+}
+
 // ---- Public API -------------------------------------------------------
 
 GLFWwindow* createWindow(int width, int height, const std::string& title) {
@@ -111,6 +121,8 @@ void runLoop(GLFWwindow* window, const WindowCallbacks& cb) {
     glfwSetKeyCallback(window, keyCB);
     glfwSetMouseButtonCallback(window, mouseButtonCB);
     glfwSetCursorPosCallback(window, cursorPosCB);
+    glfwSetCharCallback(window, charCB);
+    glfwSetDropCallback(window, dropCB);
 
     double lastTime = glfwGetTime();
 

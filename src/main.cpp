@@ -1166,6 +1166,10 @@ int main(int argc, char* argv[]) {
     };
 
     cb.onKey = [&currentMode, &photoFilter, &calendarApp](int key, int action) {
+        if (currentMode == 5 && calendarApp.isEditingDescription()) {
+            calendarApp.onKey(key, action);
+            return;
+        }
         if (action == 1) { // GLFW_PRESS
             if (key == 49)      { currentMode = 0; return; }            // '1'
             else if (key == 50) { currentMode = 1; return; }            // '2'
@@ -1197,6 +1201,18 @@ int main(int argc, char* argv[]) {
     cb.onCursorPos = [&currentMode, &calendarApp](double mx, double my) {
         if (currentMode == 5) {
             calendarApp.onCursorPos(mx, my);
+        }
+    };
+
+    cb.onChar = [&currentMode, &calendarApp](unsigned int codepoint) {
+        if (currentMode == 5) {
+            calendarApp.onChar(codepoint);
+        }
+    };
+
+    cb.onDrop = [&currentMode, &calendarApp](const std::string& filePath) {
+        if (currentMode == 5) {
+            calendarApp.onDropFile(filePath);
         }
     };
 

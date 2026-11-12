@@ -1,6 +1,18 @@
 #ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
 #endif
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#define Polygon Win32GdiPolygon
+#include <windows.h>
+#include <commdlg.h>
+#include <gdiplus.h>
+#undef Polygon
+#pragma comment(lib, "gdiplus.lib")
+#pragma comment(lib, "comdlg32.lib")
+#endif
 #include "calendar/day_storage.h"
 #include "polygons/polygons.h"
 #include "circles/circles.h"
@@ -12,6 +24,7 @@
 #include "textures/filter_mirror.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -139,6 +152,129 @@ std::string photoThemeCaption(int themeIndex) {
     };
     int idx = ((themeIndex % kNumPhotoThemes) + kNumPhotoThemes) % kNumPhotoThemes;
     return kCaptions[idx];
+}
+
+std::string defaultDayDescription(int year, int month, int day) {
+    static const char* kNotes[kNumPhotoThemes] = {
+        "GOLDEN SUNSET OVER THE RIDGE TRAIL WITH FRIENDS.",
+        "CAMPFIRE BY THE LAKE UNDER A BRIGHT CRESCENT MOON.",
+        "WARM OCEAN BREEZE AND SAILBOATS ALONG THE COAST.",
+        "CRISP AUTUMN LEAVES ALONG OUR AFTERNOON PARK WALK.",
+        "MORNING COFFEE AND WARM PASTRIES AT THE CORNER CAFE.",
+        "SUNFLOWERS BLOOMING ACROSS THE GREEN HILLSIDE.",
+        "EVENING SKYLINE GLOWING AS THE CITY LIGHTS CAME ON.",
+        "A BRIGHT DOUBLE RAINBOW RIGHT AFTER THE RAIN CLEARED!"
+    };
+    int theme = photoThemeForDay(year, month, day);
+    return kNotes[theme];
+}
+
+bool isCustomPhotoPath(const std::string& photoPath) {
+    return !photoPath.empty() && photoPath != "demo" && photoPath.rfind("theme:", 0) != 0;
+}
+
+std::string customPhotoSavePath(const std::string& saveDir, int year, int month, int day) {
+    std::string dir = saveDir.empty() ? "saves" : saveDir;
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), "/photos/day_%04d_%02d_%02d.bmp", year, month, day);
+    return dir + std::string(buf);
+}
+
+#ifdef _WIN32
+static bool decodeImageWithGdiPlus(const std::string& filePath, Framebuffer& out) {
+    static ULONG_PTR gdiplusToken = 0;
+    if (gdiplusToken == 0) {
+        Gdiplus::GdiplusStartupInput startupInput;
+        if (Gdiplus::GdiplusStartup(&gdiplusToken, &startupInput, nullptr) != Gdiplus::Ok) {
+            return false;
+        }
+    }
+
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, filePath.c_str(), -1, nullptr, 0);
+    if (wlen <= 0) {
+        wlen = MultiByteToWideChar(CP_ACP, 0, filePath.c_str(), -1, nullptr, 0);
+        if (wlen <= 0) return false;
+    }
+    std::wstring wpath((size_t)wlen, L'\0');
+    if (MultiByteToWideChar(CP_UTF8, 0, filePath.c_str(), -1, wpath.data(), wlen) == 0) {
+        MultiByteToWideChar(CP_ACP, 0, filePath.c_str(), -1, wpath.data(), wlen);
+    }
+
+    Gdiplus::Bitmap bmp(wpath.c_str());
+    if (bmp.GetLastStatus() != Gdiplus::Ok) return false;
+
+    int w = (int)bmp.GetWidth();
+    int h = (int)bmp.GetHeight();
+    if (w <= 0 || h <= 0) return false;
+
+    out = Framebuffer(w, h);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            Gdiplus::Color c;
+            if (bmp.GetPixel(x, y, &c) == Gdiplus::Ok) {
+                out.pixels[y * w + x] = {c.GetR(), c.GetG(), c.GetB(), c.GetA()};
+            }
+        }
+    }
+    return true;
+}
+#endif
+
+bool importUserPhotoFile(const std::string& srcFilePath,
+                         const std::string& destBmpPath,
+                         Framebuffer& outFb,
+                         int targetW, int targetH) {
+    if (srcFilePath.empty()) return false;
+
+    Framebuffer raw(1, 1);
+    bool loadedOk = loadImage(srcFilePath, raw);
+#ifdef _WIN32
+    if (!loadedOk) {
+        loadedOk = decodeImageWithGdiPlus(srcFilePath, raw);
+    }
+#endif
+    if (!loadedOk || raw.width <= 0 || raw.height <= 0) {
+        return false;
+    }
+
+    targetW = std::max(16, targetW);
+    targetH = std::max(16, targetH);
+    if (raw.width == targetW && raw.height == targetH) {
+        outFb = raw;
+    } else {
+        outFb = resizeBilinear(raw, targetW, targetH);
+    }
+
+    if (!destBmpPath.empty()) {
+        std::error_code ec;
+        std::filesystem::path p(destBmpPath);
+        if (p.has_parent_path()) {
+            std::filesystem::create_directories(p.parent_path(), ec);
+        }
+        outFb.saveBMP(destBmpPath);
+    }
+    return true;
+}
+
+std::string openPhotoFileDialog() {
+#ifdef _WIN32
+    char fileBuf[MAX_PATH] = {0};
+    OPENFILENAMEA ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner   = GetActiveWindow();
+    ofn.lpstrFilter =
+        "Image Files (*.bmp;*.ppm;*.png;*.jpg;*.jpeg)\0*.bmp;*.ppm;*.png;*.jpg;*.jpeg\0"
+        "BMP / PPM Images (*.bmp;*.ppm)\0*.bmp;*.ppm\0"
+        "All Files (*.*)\0*.*\0";
+    ofn.lpstrFile   = fileBuf;
+    ofn.nMaxFile    = MAX_PATH;
+    ofn.lpstrTitle  = "Select a Photo for This Day's Scrapbook Page";
+    ofn.Flags       = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (GetOpenFileNameA(&ofn)) {
+        return std::string(fileBuf);
+    }
+#endif
+    return "";
 }
 
 static void fillGradH(Framebuffer& fb, int y0, int y1, Color topCol, Color botCol) {
@@ -339,13 +475,18 @@ Framebuffer makeDayPhoto(int themeIndex, int w, int h) {
 }
 
 Framebuffer resolveDayPhoto(const DayLayout& layout, int w, int h) {
-    if (!layout.photoPath.empty() && layout.photoPath != "demo" &&
-        layout.photoPath.rfind("theme:", 0) != 0) {
+    if (isCustomPhotoPath(layout.photoPath)) {
         Framebuffer loaded(1, 1);
         if (loadImage(layout.photoPath, loaded)) {
             if (loaded.width == w && loaded.height == h) return loaded;
             return resizeBilinear(loaded, w, h);
         }
+#ifdef _WIN32
+        if (decodeImageWithGdiPlus(layout.photoPath, loaded)) {
+            if (loaded.width == w && loaded.height == h) return loaded;
+            return resizeBilinear(loaded, w, h);
+        }
+#endif
     }
     int theme = parsePhotoTheme(layout.photoPath, layout.day);
     return makeDayPhoto(theme, w, h);
@@ -382,6 +523,7 @@ DayLayout makeDefaultDayLayout(int year, int month, int day, const std::string& 
     L.photoFilter    = (day == 5) ? 2 : 0;
     L.filterStrength = (day == 5) ? 0.45f : 1.0f;
     L.dateText       = formatDateStamp(year, month, day);
+    L.description    = defaultDayDescription(year, month, day);
 
     const Color mustard   {228, 165,  69, 255};
     const Color honey     {249, 205, 125, 255};
@@ -407,21 +549,21 @@ DayLayout makeDefaultDayLayout(int year, int month, int day, const std::string& 
     // 2. Stickers arranged on the right journal card and Polaroid corner
     L.elements.push_back(makeElem(ShapeKind::STAR, {525, 132 + yShift}, 14.0 + rotShift, {1.05, 1.05},
                                   mustard, {150, 100, 30, 255}, 3));
-    L.elements.push_back(makeElem(ShapeKind::BEZIER_HEART, {180, 378}, -16.0 + rotShift, {0.95, 0.95},
+    L.elements.push_back(makeElem(ShapeKind::BEZIER_HEART, {180, 355}, -16.0 + rotShift, {0.90, 0.90},
                                   terracotta, {120, 50, 35, 255}, 4));
     L.elements.push_back(makeElem(ShapeKind::HEXAGON, {665, 136 - yShift}, 10.0, {1.0, 1.0},
                                   sage, dark, 5));
-    L.elements.push_back(makeElem(ShapeKind::SQUARE, {555, 258}, 16.0 - rotShift, {0.95, 0.95},
+    L.elements.push_back(makeElem(ShapeKind::SQUARE, {555, 236}, 16.0 - rotShift, {0.92, 0.92},
                                   tint(honey, green, 0.55), {170, 120, 40, 255}, 6));
-    L.elements.push_back(makeElem(ShapeKind::CIRCLE, {690, 252}, 0.0, {1.0, 1.0},
+    L.elements.push_back(makeElem(ShapeKind::CIRCLE, {690, 234}, 0.0, {0.95, 0.95},
                                   green, deepGreen, 7));
-    L.elements.push_back(makeElem(ShapeKind::CLOUD, {625, 360}, 0.0, {0.92, 0.92},
+    L.elements.push_back(makeElem(ShapeKind::CLOUD, {625, 318}, 0.0, {0.88, 0.88},
                                   white, brown, 8));
-    L.elements.push_back(makeElem(ShapeKind::CURVY_STAR, {420, 468}, 12.0, {0.95, 0.95},
+    L.elements.push_back(makeElem(ShapeKind::CURVY_STAR, {505, 378}, 12.0, {0.90, 0.90},
                                   honey, brown, 9));
 
-    // 3. Date stamp sticker at bottom-right
-    L.elements.push_back(makeElem(ShapeKind::DATE_STAMP, {625, 474}, -3.0, {1.0, 1.0},
+    // 3. Date stamp sticker above the sentence description box
+    L.elements.push_back(makeElem(ShapeKind::DATE_STAMP, {632, 384}, -2.5, {0.94, 0.94},
                                   white, brown, 10));
 
     L.sortByZ();
@@ -438,6 +580,7 @@ std::string serializeDayLayout(const DayLayout& layout) {
     out << "datetext " << (layout.dateText.empty()
                            ? formatDateStamp(layout.year, layout.month, layout.day)
                            : layout.dateText) << "\n";
+    out << "note " << layout.description << "\n";
 
     for (const auto& e : layout.elements) {
         out << "element " << shapeKindToString(e.kind)
@@ -461,6 +604,8 @@ bool deserializeDayLayout(const std::string& text, DayLayout& outLayout) {
 
     DayLayout parsed;
     parsed.elements.clear();
+    parsed.description.clear();
+    bool hasNoteTag = false;
 
     std::string line;
     std::getline(in, line);
@@ -484,6 +629,12 @@ bool deserializeDayLayout(const std::string& text, DayLayout& outLayout) {
             std::getline(ls >> std::ws, rest);
             if (!rest.empty() && rest.back() == '\r') rest.pop_back();
             parsed.dateText = rest;
+        } else if (tag == "note") {
+            hasNoteTag = true;
+            std::string rest;
+            std::getline(ls >> std::ws, rest);
+            if (!rest.empty() && rest.back() == '\r') rest.pop_back();
+            parsed.description = rest;
         } else if (tag == "element") {
             std::string kindStr;
             SavedElement e;
@@ -511,6 +662,10 @@ bool deserializeDayLayout(const std::string& text, DayLayout& outLayout) {
                       (uint8_t)std::clamp(ea, 0, 255)};
             parsed.elements.push_back(e);
         }
+    }
+
+    if (!hasNoteTag) {
+        parsed.description = defaultDayDescription(parsed.year, parsed.month, parsed.day);
     }
 
     parsed.sortByZ();

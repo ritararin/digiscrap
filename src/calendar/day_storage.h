@@ -63,6 +63,7 @@ struct DayLayout {
     int         photoFilter    = 0;      // 0 = FILTER_NONE (shows vivid daily photo by default; F cycles sepia/etc.)
     float       filterStrength = 1.0f;
     std::string dateText       = "05-10-2026";
+    std::string description    = "MORNING COFFEE AND A QUIET WALK BEFORE CLASS.";
     std::vector<SavedElement> elements;
 
     void sortByZ();
@@ -78,8 +79,22 @@ int         photoThemeForDay(int year, int month, int day);
 int         parsePhotoTheme(const std::string& photoPath, int fallbackDay = 1);
 std::string makePhotoThemeSpec(int themeIndex);
 std::string photoThemeCaption(int themeIndex);
+std::string defaultDayDescription(int year, int month, int day);
+bool        isCustomPhotoPath(const std::string& photoPath);
 Framebuffer makeDayPhoto(int themeIndex, int w = 360, int h = 270);
 Framebuffer resolveDayPhoto(const DayLayout& layout, int w = 360, int h = 270);
+
+// Import a user image file (.bmp, .ppm, .png, .jpg, .jpeg) into `outFb` (resized
+// to targetW x targetH using our resizeBilinear) and save a 24-bit BMP copy at
+// `destBmpPath` so future loads and thumbnails use our own BMP loader.
+std::string customPhotoSavePath(const std::string& saveDir, int year, int month, int day);
+bool        importUserPhotoFile(const std::string& srcFilePath,
+                                const std::string& destBmpPath,
+                                Framebuffer& outFb,
+                                int targetW = 360, int targetH = 270);
+
+// Open a native OS file picker dialog to choose a photo file (returns "" if cancelled).
+std::string openPhotoFileDialog();
 
 // Build a rich default scrapbook layout for (year, month, day).
 DayLayout makeDefaultDayLayout(int year, int month, int day,
