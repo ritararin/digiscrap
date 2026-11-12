@@ -97,14 +97,14 @@ static void testOption5StorageAndAnimations() {
     CHECK(!loadDayLayout("output/no_such_day_file.txt", untouched), "missing layout file rejected");
     CHECK(!deserializeDayLayout("BAD_HEADER\n", untouched), "malformed header rejected");
 
-    // 4. Thumbnail rendering reflects saved layout content & per-day photos
-    Framebuffer photo0 = makeDayPhoto(0, 60, 45);
-    Framebuffer photo1 = makeDayPhoto(1, 60, 45);
+    // 4. Thumbnail rendering reflects saved layout content & custom photo files
+    Framebuffer emptyPhoto = resolveDayPhoto(makeDefaultDayLayout(2026, 10, 5), 60, 45);
+    Framebuffer realPhoto  = resolveDayPhoto(orig, 60, 45);
     bool photosDistinct = false;
-    for (size_t i = 0; i < photo0.pixels.size(); ++i) {
-        if (!same(photo0.pixels[i], photo1.pixels[i])) { photosDistinct = true; break; }
+    for (size_t i = 0; i < emptyPhoto.pixels.size(); ++i) {
+        if (!same(emptyPhoto.pixels[i], realPhoto.pixels[i])) { photosDistinct = true; break; }
     }
-    CHECK(photosDistinct, "daily photo themes generate distinct scene images");
+    CHECK(photosDistinct, "resolveDayPhoto distinguishes empty photo slot from actual picture file");
 
     Framebuffer thumbA = renderDayThumbnail(orig, 84, 44);
     CHECK(thumbA.width == 84 && thumbA.height == 44, "renderDayThumbnail dimensions 84x44");
@@ -174,18 +174,30 @@ static void testOption5StorageAndAnimations() {
 
     {
         CalendarScrapbookApp app;
-        app.init(gl::Texture{}, gl::Texture{}, testSaveDir, "demo");
+        app.init(gl::Texture{}, gl::Texture{}, testSaveDir, "none");
         CHECK(app.viewMode() == CalendarScrapbookApp::VIEW_CALENDAR, "starts in calendar view");
         // Click day 5 cell to open its page
         Vec2 c5 = cellCentre(app.calendarLayout(), 5);
         app.onMouseButton(0, 1, c5.x, c5.y);
         CHECK(app.viewMode() == CalendarScrapbookApp::VIEW_DAY_PAGE && app.highlightedDay() == 5,
               "clicking highlighted day opens its day page");
+        CHECK(!isCustomPhotoPath(app.currentDayLayout().photoPath),
+              "new day starts with no photo until an actual picture is uploaded");
+
         size_t countBefore = app.currentDayLayout().elements.size();
-        // Press 'A' to add a sticker and trigger autosave
-        app.onKey(65, 1);
+        // Click slot 1 (HEART) in the bottom Sticker Palette (x=220, y=490) to add a heart sticker
+        app.onMouseButton(0, 1, 220, 490);
+        CHECK(app.currentDayLayout().elements.size() == countBefore + 1 &&
+              app.currentDayLayout().elements.back().kind == ShapeKind::BEZIER_HEART,
+              "clicking HEART slot in Sticker Palette adds a heart sticker to the page");
+
+        // Click slot 0 (STAR) in the bottom Sticker Palette (x=140, y=490), then remove it via DEL STICKER button
+        app.onMouseButton(0, 1, 140, 490);
+        CHECK(app.currentDayLayout().elements.size() == countBefore + 2,
+              "clicking STAR slot in Sticker Palette adds a star sticker");
+        app.onMouseButton(0, 1, 610, 52); // Click "DEL STICKER" button in top toolbar
         CHECK(app.currentDayLayout().elements.size() == countBefore + 1,
-              "pressing A adds a new sticker to the day page");
+              "clicking DEL STICKER removes the selected sticker");
 
         // Upload user's own photo file for Day 5
         CHECK(app.setCustomPhotoFromFile(userPicFile),
@@ -193,10 +205,10 @@ static void testOption5StorageAndAnimations() {
         CHECK(isCustomPhotoPath(app.currentDayLayout().photoPath),
               "day 5 photoPath points to imported custom user picture");
 
-        // Click inside the sentence description box (x=250, y=490), clear it, and type a sentence
-        app.onMouseButton(0, 1, 700, 456); // Click "CLEAR" button inside description header
+        // Click inside the right-side Journal Text Area (x=600, y=200), clear it, and type a journal entry
+        app.onMouseButton(0, 1, 705, 98); // Click "CLEAR" button in journal header
         CHECK(app.isEditingDescription() && app.currentDayLayout().description.empty(),
-              "clicking CLEAR inside description box enters editing mode and clears note");
+              "clicking CLEAR in journal header enters editing mode and clears journal");
         const std::string typedSentence = "Best trip to the beach!X";
         for (char c : typedSentence) {
             app.onChar((unsigned int)c);
@@ -205,19 +217,19 @@ static void testOption5StorageAndAnimations() {
         app.onKey(257, 1); // Enter finishes editing
         CHECK(!app.isEditingDescription() &&
               app.currentDayLayout().description == "BEST TRIP TO THE BEACH!",
-              "typing sentence + Backspace + Enter updates and saves daily description");
+              "typing in journal + Backspace + Enter updates and saves daily journal");
     }
     {
-        // Reopen app and verify saved layout, custom photo, and sentence description are restored
+        // Reopen app and verify saved layout, custom photo, and journal text are restored
         CalendarScrapbookApp app2;
-        app2.init(gl::Texture{}, gl::Texture{}, testSaveDir, "demo");
+        app2.init(gl::Texture{}, gl::Texture{}, testSaveDir, "none");
         app2.openDayPage(5, false);
-        CHECK(app2.currentDayLayout().elements.size() == 11,
+        CHECK(app2.currentDayLayout().elements.size() == 4,
               "reopening app restores saved layout with added sticker from disk");
         CHECK(isCustomPhotoPath(app2.currentDayLayout().photoPath),
               "reopening app restores user's custom uploaded photo path");
         CHECK(app2.currentDayLayout().description == "BEST TRIP TO THE BEACH!",
-              "reopening app restores user's typed sentence description");
+              "reopening app restores user's typed journal entry");
     }
     std::remove(userPicFile.c_str());
     std::filesystem::remove_all(testSaveDir, ec);

@@ -69,9 +69,10 @@ public:
     void openDayPage(int day, bool withPageTurn = true);
     void returnToCalendar(bool withPageTurn = true);
     void navigateMonth(int deltaMonths);
-    void cycleDayPhotoTheme();
     bool setCustomPhotoFromFile(const std::string& srcFilePath);
     bool promptAndUploadPhoto();
+    void addStickerFromPalette(int paletteIndex);
+    bool removeSelectedOrLastSticker();
     void setEditingDescription(bool editing);
     bool isEditingDescription() const { return editingNote_; }
     void setDayDescription(const std::string& text);
@@ -80,6 +81,7 @@ public:
 
     ViewMode              viewMode() const { return view_; }
     int                   highlightedDay() const { return highlightedDay_; }
+    int                   selectedElementIndex() const { return selectedElem_; }
     const CalendarLayout& calendarLayout() const { return calLayout_; }
     const DayLayout&      currentDayLayout() const { return currentDay_; }
 
@@ -113,9 +115,8 @@ private:
     gl::Texture fontTex_{};
     gl::Texture customDayTex_{};
     std::string customDayTexPath_;
-    std::array<gl::Texture, kNumPhotoThemes> themePhotos_{};
     std::string saveDir_          = "saves";
-    std::string defaultPhotoPath_ = "demo";
+    std::string defaultPhotoPath_ = "none";
 
     ViewMode       view_           = VIEW_CALENDAR;
     CalendarLayout calLayout_{};

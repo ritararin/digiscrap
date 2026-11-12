@@ -154,22 +154,67 @@ bool isSupportedNoteChar(char c) {
     }
 }
 
-// Wrap a sentence into at most 2 lines of `maxCols` characters each, breaking on spaces when possible.
-std::pair<std::string, std::string> wrapTwoLines(const std::string& text, size_t maxCols = 52) {
-    if (text.size() <= maxCols) {
-        return {text, ""};
+// Wrap journal text into up to `maxLines` lines of `maxCols` characters each, breaking on spaces or '\n'.
+std::vector<std::string> wrapJournalLines(const std::string& text, size_t maxCols = 26, size_t maxLines = 10) {
+    std::vector<std::string> lines;
+    size_t i = 0;
+    const size_t n = text.size();
+    while (i < n && lines.size() < maxLines) {
+        if (text[i] == '\n') {
+            lines.push_back("");
+            ++i;
+            continue;
+        }
+        size_t lineEnd = i;
+        size_t lastSpace = std::string::npos;
+        while (lineEnd < n && text[lineEnd] != '\n' && (lineEnd - i) < maxCols) {
+            if (text[lineEnd] == ' ') lastSpace = lineEnd;
+            ++lineEnd;
+        }
+        if (lineEnd < n && text[lineEnd] != '\n' && (lineEnd - i) == maxCols) {
+            if (lastSpace != std::string::npos && lastSpace > i) {
+                lines.push_back(text.substr(i, lastSpace - i));
+                i = lastSpace + 1;
+            } else {
+                lines.push_back(text.substr(i, maxCols));
+                i += maxCols;
+            }
+        } else {
+            lines.push_back(text.substr(i, lineEnd - i));
+            i = lineEnd;
+            if (i < n && text[i] == '\n') ++i;
+        }
     }
-    size_t splitPos = text.rfind(' ', maxCols);
-    if (splitPos == std::string::npos || splitPos < maxCols / 2) {
-        splitPos = maxCols;
-    }
-    std::string line1 = text.substr(0, splitPos);
-    size_t start2 = (splitPos < text.size() && text[splitPos] == ' ') ? (splitPos + 1) : splitPos;
-    std::string line2 = text.substr(start2);
-    if (line2.size() > maxCols) {
-        line2 = line2.substr(0, maxCols);
-    }
-    return {line1, line2};
+    if (lines.empty()) lines.push_back("");
+    return lines;
+}
+
+struct PaletteSlot {
+    ShapeKind   kind;
+    const char* label;
+    Color       fill;
+    Color       edge;
+    double      previewScale;
+};
+
+constexpr int kNumPaletteSlots = 8;
+
+const PaletteSlot kStickerPalette[kNumPaletteSlots] = {
+    {ShapeKind::STAR,         "STAR",   {228, 165,  69, 255}, {150, 100, 30, 255}, 0.34},
+    {ShapeKind::BEZIER_HEART, "HEART",  {196,  92,  70, 255}, {120,  50, 35, 255}, 0.24},
+    {ShapeKind::CURVY_STAR,   "FLOWER", {249, 205, 125, 255}, {154, 106, 67, 255}, 0.42},
+    {ShapeKind::CLOUD,        "CLOUD",  {255, 252, 245, 255}, {154, 106, 67, 255}, 0.24},
+    {ShapeKind::RIBBON,       "RIBBON", { 96, 134, 108, 255}, { 68,  98, 78, 255}, 0.22},
+    {ShapeKind::HEXAGON,      "HEX",    {173, 170, 134, 255}, { 64,  58, 48, 255}, 0.40},
+    {ShapeKind::CIRCLE,       "CIRCLE", {110, 145, 121, 255}, { 68,  98, 78, 255}, 0.42},
+    {ShapeKind::TAPE,         "TAPE",   {228, 165,  69, 195}, {180, 130, 50, 180}, 0.34},
+};
+
+void paletteSlotRect(int idx, double& x0, double& y0, double& x1, double& y1) {
+    x0 = 110.0 + idx * 79.0;
+    x1 = x0 + 73.0;
+    y0 = 468.0;
+    y1 = 522.0;
 }
 
 } // namespace
@@ -319,27 +364,11 @@ void CalendarScrapbookApp::init(const gl::Texture& photoTex, const gl::Texture& 
     photoTex_         = photoTex;
     fontTex_          = fontTex;
     saveDir_          = saveDir.empty() ? "saves" : saveDir;
-    defaultPhotoPath_ = defaultPhotoPath.empty() ? "demo" : defaultPhotoPath;
+    defaultPhotoPath_ = isCustomPhotoPath(defaultPhotoPath) ? defaultPhotoPath : "none";
 
     calLayout_      = makeMonthLayout(2026, 10);
     highlightedDay_ = 5;
     view_           = VIEW_CALENDAR;
-
-    // Generate all 8 distinct daily theme textures on the GPU when an OpenGL context is active
-    if (fontTex_.id != 0 || photoTex_.id != 0) {
-        for (int i = 0; i < kNumPhotoThemes; ++i) {
-            Framebuffer img = makeDayPhoto(i, 360, 270);
-            themePhotos_[i] = gl::createTexture(img, false);
-        }
-    }
-
-    // Seed saved layouts across the month so the calendar showcases rich daily photo thumbnails
-    for (int d : {1, 2, 3, 4, 5, 8, 14, 22}) {
-        if (!hasSavedDayLayout(saveDir_, calLayout_.year, calLayout_.month, d)) {
-            DayLayout seeded = makeDefaultDayLayout(calLayout_.year, calLayout_.month, d, defaultPhotoPath_);
-            saveDayLayout(seeded, dayLayoutPath(saveDir_, calLayout_.year, calLayout_.month, d));
-        }
-    }
 
     currentDay_ = loadOrCreateDay(calLayout_.year, calLayout_.month, highlightedDay_);
     syncCustomPhotoTexture(currentDay_);
@@ -352,14 +381,15 @@ void CalendarScrapbookApp::shutdown() {
         gl::deleteTexture(customDayTex_);
     }
     customDayTexPath_.clear();
-    for (auto& tex : themePhotos_) {
-        gl::deleteTexture(tex);
-    }
 }
 
 void CalendarScrapbookApp::syncCustomPhotoTexture(const DayLayout& layout) {
     if (!fontTex_.id && !photoTex_.id) return;
     if (!isCustomPhotoPath(layout.photoPath)) {
+        if (customDayTex_.id != 0) {
+            gl::deleteTexture(customDayTex_);
+        }
+        customDayTexPath_.clear();
         return;
     }
     if (customDayTex_.id != 0 && customDayTexPath_ == layout.photoPath) {
@@ -374,19 +404,16 @@ void CalendarScrapbookApp::syncCustomPhotoTexture(const DayLayout& layout) {
 }
 
 const gl::Texture& CalendarScrapbookApp::textureForDay(const DayLayout& layout) const {
+    static const gl::Texture kEmptyTex{};
     if (isCustomPhotoPath(layout.photoPath)) {
         if (customDayTex_.id != 0 && customDayTexPath_ == layout.photoPath) {
             return customDayTex_;
         }
-        if (photoTex_.id != 0) {
+        if (photoTex_.id != 0 && layout.photoPath == defaultPhotoPath_) {
             return photoTex_;
         }
     }
-    int theme = parsePhotoTheme(layout.photoPath, layout.day);
-    if (themePhotos_[theme].id != 0) {
-        return themePhotos_[theme];
-    }
-    return photoTex_;
+    return kEmptyTex;
 }
 
 void CalendarScrapbookApp::clearMonthThumbnails() {
@@ -426,9 +453,8 @@ DayLayout CalendarScrapbookApp::loadOrCreateDay(int year, int month, int day) co
     std::string path = dayLayoutPath(saveDir_, year, month, day);
     DayLayout loaded;
     if (loadDayLayout(path, loaded)) {
-        // Upgrade legacy "demo" photo tag to the day's distinct photo theme
-        if (loaded.photoPath.empty() || loaded.photoPath == "demo") {
-            loaded.photoPath = makePhotoThemeSpec(photoThemeForDay(year, month, day));
+        if (!isCustomPhotoPath(loaded.photoPath)) {
+            loaded.photoPath = "none";
         }
         return loaded;
     }
@@ -445,11 +471,45 @@ bool CalendarScrapbookApp::saveCurrentDay() {
     return ok;
 }
 
-void CalendarScrapbookApp::cycleDayPhotoTheme() {
-    int curTheme = parsePhotoTheme(currentDay_.photoPath, currentDay_.day);
-    int nextTheme = (curTheme + 1) % kNumPhotoThemes;
-    currentDay_.photoPath = makePhotoThemeSpec(nextTheme);
+void CalendarScrapbookApp::addStickerFromPalette(int paletteIndex) {
+    int slotIdx = ((paletteIndex % kNumPaletteSlots) + kNumPaletteSlots) % kNumPaletteSlots;
+    const PaletteSlot& slot = kStickerPalette[slotIdx];
+
+    int maxZ = 0;
+    for (const auto& e : currentDay_.elements) maxZ = std::max(maxZ, e.zOrder);
+
+    int count = (int)currentDay_.elements.size();
+    double offsetX = ((count % 5) - 2) * 28.0;
+    double offsetY = ((count % 4) - 1) * 24.0;
+
+    SavedElement ne;
+    ne.kind           = slot.kind;
+    ne.xform.pivot    = {0, 0};
+    ne.xform.position = {310.0 + offsetX, 240.0 + offsetY};
+    ne.xform.rotation = (count % 2 == 0) ? 8.0 : -10.0;
+    ne.xform.scale    = {1.0, 1.0};
+    ne.fill           = slot.fill;
+    ne.edge           = slot.edge;
+    ne.zOrder         = maxZ + 1;
+
+    currentDay_.elements.push_back(ne);
+    selectedElem_ = (int)currentDay_.elements.size() - 1;
+    editingNote_  = false;
     saveCurrentDay();
+    triggerDropAnimation(selectedElem_);
+}
+
+bool CalendarScrapbookApp::removeSelectedOrLastSticker() {
+    if (currentDay_.elements.empty()) return false;
+    int idxToRemove = selectedElem_;
+    if (idxToRemove < 0 || idxToRemove >= (int)currentDay_.elements.size()) {
+        idxToRemove = (int)currentDay_.elements.size() - 1;
+    }
+    currentDay_.elements.erase(currentDay_.elements.begin() + idxToRemove);
+    selectedElem_ = -1;
+    dragging_     = false;
+    saveCurrentDay();
+    return true;
 }
 
 bool CalendarScrapbookApp::setCustomPhotoFromFile(const std::string& srcFilePath) {
@@ -493,8 +553,12 @@ void CalendarScrapbookApp::setDayDescription(const std::string& text) {
     std::string cleaned;
     cleaned.reserve(text.size());
     for (char c : text) {
+        if (c == '\n') {
+            if (cleaned.size() < 240) cleaned.push_back('\n');
+            continue;
+        }
         char up = (char)std::toupper((unsigned char)c);
-        if (isSupportedNoteChar(up) && cleaned.size() < 104) {
+        if (isSupportedNoteChar(up) && cleaned.size() < 240) {
             cleaned.push_back(up);
         }
     }
@@ -616,6 +680,22 @@ void CalendarScrapbookApp::update(double dt) {
 void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, double my) {
     mouseX_ = mx;
     mouseY_ = my;
+
+    // Right-click on Day Page deletes the sticker under the cursor immediately
+    if (button == 1 && action == 1 && view_ == VIEW_DAY_PAGE) {
+        Vec2 clickPt{mx, my};
+        for (int i = (int)currentDay_.elements.size() - 1; i >= 0; --i) {
+            if (currentDay_.elements[i].toSticker().hitTest(clickPt)) {
+                currentDay_.elements.erase(currentDay_.elements.begin() + i);
+                selectedElem_ = -1;
+                dragging_     = false;
+                saveCurrentDay();
+                return;
+            }
+        }
+        return;
+    }
+
     if (button != 0) return;
 
     if (action == 0) { // GLFW_RELEASE
@@ -668,62 +748,80 @@ void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, doub
         openDayPage(nextDay, true);
         return;
     }
-    if (insideRect(mx, my, 328, 38, 434, 68)) {
+    if (insideRect(mx, my, 328, 38, 446, 68)) {
         editingNote_ = false;
         promptAndUploadPhoto();
         return;
     }
-    if (insideRect(mx, my, 440, 38, 514, 68)) {
-        editingNote_ = false;
-        cycleDayPhotoTheme();
-        return;
-    }
-    if (insideRect(mx, my, 520, 38, 598, 68)) {
+    if (insideRect(mx, my, 452, 38, 540, 68)) {
         editingNote_ = false;
         onKey(70, 1); // 'F' cycle filter
         return;
     }
-    if (insideRect(mx, my, 604, 38, 690, 68)) {
+    if (insideRect(mx, my, 546, 38, 684, 68)) {
         editingNote_ = false;
-        onKey(65, 1); // 'A' add sticker
+        removeSelectedOrLastSticker();
         return;
     }
-    if (insideRect(mx, my, 696, 38, 758, 68)) {
+    if (insideRect(mx, my, 690, 38, 758, 68)) {
         editingNote_ = false;
         triggerDropAnimation(-1);
         return;
     }
 
-    // ---- Polaroid "UPLOAD" mini button (bottom-right of Polaroid frame) ----
-    if (insideRect(mx, my, 366, 398, 448, 424)) {
+    // ---- 1. Check if the selected sticker's red [X] delete badge was clicked ----
+    if (selectedElem_ >= 0 && selectedElem_ < (int)currentDay_.elements.size()) {
+        const SavedElement& sel = currentDay_.elements[selectedElem_];
+        Polygon wp = transformPolygon(buildShapePolygon(sel.kind), sel.xform.toMat3());
+        Vec2 bmin, bmax;
+        boundingBox(wp, bmin, bmax);
+        if (insideRect(mx, my, bmax.x - 6.0, bmin.y - 14.0, bmax.x + 14.0, bmin.y + 6.0)) {
+            currentDay_.elements.erase(currentDay_.elements.begin() + selectedElem_);
+            selectedElem_ = -1;
+            dragging_     = false;
+            saveCurrentDay();
+            return;
+        }
+    }
+
+    // ---- 2. Bottom Visual Sticker Palette (x = 102..748, y = 442..526) ----
+    if (insideRect(mx, my, 102, 442, 748, 526)) {
+        for (int s = 0; s < kNumPaletteSlots; ++s) {
+            double sx0, sy0, sx1, sy1;
+            paletteSlotRect(s, sx0, sy0, sx1, sy1);
+            if (insideRect(mx, my, sx0, sy0, sx1, sy1)) {
+                addStickerFromPalette(s);
+                return;
+            }
+        }
+        return;
+    }
+
+    // ---- 3. Right-Side Journal Card Header Buttons (WRITE/DONE & CLEAR) ----
+    if (insideRect(mx, my, 672, 86, 742, 112)) {
+        currentDay_.description.clear();
+        editingNote_  = true;
+        selectedElem_ = -1;
+        dragging_     = false;
+        saveCurrentDay();
+        return;
+    }
+    if (insideRect(mx, my, 596, 86, 666, 112)) {
+        editingNote_  = !editingNote_;
+        selectedElem_ = -1;
+        dragging_     = false;
+        saveCurrentDay();
+        return;
+    }
+
+    // ---- 4. Polaroid "UPLOAD" / "CHANGE" button (bottom-right of Polaroid frame) ----
+    if (insideRect(mx, my, 346, 396, 448, 422)) {
         editingNote_ = false;
         promptAndUploadPhoto();
         return;
     }
 
-    // ---- Daily Memory Sentence Description Box (x = 102..748, y = 442..526) ----
-    if (insideRect(mx, my, 102, 442, 748, 526)) {
-        // Check if "CLEAR" mini button inside description box was clicked
-        if (insideRect(mx, my, 672, 446, 742, 468)) {
-            currentDay_.description.clear();
-            editingNote_ = true;
-            selectedElem_ = -1;
-            saveCurrentDay();
-            return;
-        }
-        editingNote_  = true;
-        selectedElem_ = -1;
-        dragging_     = false;
-        return;
-    }
-
-    // Clicking outside the description box finishes note editing
-    if (editingNote_) {
-        editingNote_ = false;
-        saveCurrentDay();
-    }
-
-    // Hit-test stickers front-to-back using inverseMatrix() and pointInPolygon()
+    // ---- 5. Hit-test stickers front-to-back using inverseMatrix() and pointInPolygon() ----
     Vec2 clickPt{mx, my};
     int hitIdx = -1;
     for (int i = (int)currentDay_.elements.size() - 1; i >= 0; --i) {
@@ -735,6 +833,7 @@ void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, doub
     }
 
     if (hitIdx >= 0) {
+        editingNote_ = false;
         int maxZ = 0;
         for (const auto& e : currentDay_.elements) maxZ = std::max(maxZ, e.zOrder);
         currentDay_.elements[hitIdx].zOrder = maxZ + 1;
@@ -746,10 +845,30 @@ void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, doub
             currentDay_.elements[selectedElem_].xform.position.y - my
         };
         saveCurrentDay();
-    } else {
+        return;
+    }
+
+    // ---- 6. Clicking inside the Right-Side Journal Area enters journal writing mode ----
+    if (insideRect(mx, my, 476, 82, 748, 428)) {
+        editingNote_  = true;
         selectedElem_ = -1;
         dragging_     = false;
+        return;
     }
+
+    // ---- 7. Clicking inside an empty Polaroid frame opens the photo picker ----
+    if (insideRect(mx, my, 118, 96, 440, 352) && !isCustomPhotoPath(currentDay_.photoPath)) {
+        editingNote_ = false;
+        promptAndUploadPhoto();
+        return;
+    }
+
+    if (editingNote_) {
+        editingNote_ = false;
+        saveCurrentDay();
+    }
+    selectedElem_ = -1;
+    dragging_     = false;
 }
 
 void CalendarScrapbookApp::onCursorPos(double mx, double my) {
@@ -817,7 +936,7 @@ void CalendarScrapbookApp::onKey(int key, int action) {
         returnToCalendar(true);
         return;
     }
-    if (key == 84 || key == 257 || key == 335) { // 'T' or Enter -> Edit daily sentence description
+    if (key == 84 || key == 257 || key == 335) { // 'T' or Enter -> Edit daily journal
         editingNote_  = true;
         selectedElem_ = -1;
         return;
@@ -836,10 +955,6 @@ void CalendarScrapbookApp::onKey(int key, int action) {
         openDayPage(prevDay, true);
         return;
     }
-    if (key == 67) { // 'C' -> Cycle daily photo scene
-        cycleDayPhotoTheme();
-        return;
-    }
     if (key == 68) { // 'D' -> Replay live drop-and-settle animation
         triggerDropAnimation(-1);
         return;
@@ -852,6 +967,7 @@ void CalendarScrapbookApp::onKey(int key, int action) {
     }
     if (key == 76) { // 'L' -> Reload from file
         currentDay_ = loadOrCreateDay(currentDay_.year, currentDay_.month, currentDay_.day);
+        syncCustomPhotoTexture(currentDay_);
         triggerDropAnimation(-1);
         return;
     }
@@ -861,32 +977,13 @@ void CalendarScrapbookApp::onKey(int key, int action) {
         saveCurrentDay();
         return;
     }
-    if (key == 65) { // 'A' -> Add a new sticker with live drop-and-settle
-        static const ShapeKind kPalette[] = {
-            ShapeKind::STAR, ShapeKind::BEZIER_HEART, ShapeKind::CURVY_STAR,
-            ShapeKind::RIBBON, ShapeKind::CLOUD, ShapeKind::HEXAGON
-        };
-        static const Color kFills[] = {
-            kMustard, kTerracotta, kHoney, kGreen, kWhite, kSage
-        };
-        int idx = (int)currentDay_.elements.size() % 6;
-        int maxZ = 0;
-        for (const auto& e : currentDay_.elements) maxZ = std::max(maxZ, e.zOrder);
-
-        SavedElement ne;
-        ne.kind           = kPalette[idx];
-        ne.xform.pivot    = {0, 0};
-        ne.xform.position = {490.0 + (idx % 3) * 75.0, 165.0 + (idx % 4) * 65.0};
-        ne.xform.rotation = (idx % 2 == 0) ? 12.0 : -14.0;
-        ne.xform.scale    = {1.0, 1.0};
-        ne.fill           = kFills[idx];
-        ne.edge           = kBrown;
-        ne.zOrder         = maxZ + 1;
-
-        currentDay_.elements.push_back(ne);
-        selectedElem_ = (int)currentDay_.elements.size() - 1;
-        saveCurrentDay();
-        triggerDropAnimation(selectedElem_);
+    if (key == 65) { // 'A' -> Add next sticker from the visual palette
+        int idx = (int)currentDay_.elements.size() % kNumPaletteSlots;
+        addStickerFromPalette(idx);
+        return;
+    }
+    if (key == 261 || key == 259 || key == 88) { // Delete, Backspace, or 'X' -> Remove selected/last sticker
+        removeSelectedOrLastSticker();
         return;
     }
 
@@ -907,10 +1004,6 @@ void CalendarScrapbookApp::onKey(int key, int action) {
             sel.xform.scale.x = std::max(0.35, sel.xform.scale.x * 0.9);
             sel.xform.scale.y = std::max(0.35, sel.xform.scale.y * 0.9);
             changed = true;
-        } else if (key == 261 || key == 259) { // Delete or Backspace
-            currentDay_.elements.erase(currentDay_.elements.begin() + selectedElem_);
-            selectedElem_ = -1;
-            changed = true;
         }
         if (changed) saveCurrentDay();
     }
@@ -922,7 +1015,7 @@ void CalendarScrapbookApp::onChar(unsigned int codepoint) {
 
     char c = (char)std::toupper((unsigned char)codepoint);
     if (!isSupportedNoteChar(c)) return;
-    if (currentDay_.description.size() >= 104) return;
+    if (currentDay_.description.size() >= 240) return;
 
     currentDay_.description.push_back(c);
     saveCurrentDay();
@@ -1145,31 +1238,32 @@ void CalendarScrapbookApp::renderCalendarView() {
 
     // 6. Cohesive Bottom Status Ribbon (crisp integer scale = 2)
     drawRectGL(70, 536, 756, 560, kDeepGreen, kBrown);
-    int theme = photoThemeForDay(calLayout_.year, calLayout_.month, highlightedDay_);
-    std::string footer = "DAY " + std::to_string(highlightedDay_) + " - " + photoThemeCaption(theme)
-                       + " - CLICK OR ENTER TO OPEN PAGE";
+    bool hasSaved = (monthThumbs_.find(highlightedDay_) != monthThumbs_.end());
+    std::string footer = "DAY " + std::to_string(highlightedDay_)
+                       + (hasSaved ? " - SAVED ENTRY" : " - EMPTY PAGE")
+                       + " - CLICK OR PRESS ENTER TO OPEN";
     drawCrispTextCentered(fontTex_, footer, 413, 548, 2, kWhite, true, kDark);
 }
 
 void CalendarScrapbookApp::renderDayPageView(const DayLayout& layout, bool applyDropAnim) {
     renderNotebookShell();
 
-    // 1. Top Cohesive Toolbar with Hover States (crisp integer scale = 2)
-    drawButtonGL(fontTex_,  74, 38, 178, 68, "CALENDAR",  kGreen,      kWhite, insideRect(mouseX_, mouseY_,  74, 38, 178, 68));
-    drawButtonGL(fontTex_, 184, 38, 250, 68, "PREV",      kPaper,      kDark,  insideRect(mouseX_, mouseY_, 184, 38, 250, 68));
-    drawButtonGL(fontTex_, 256, 38, 322, 68, "NEXT",      kPaper,      kDark,  insideRect(mouseX_, mouseY_, 256, 38, 322, 68));
-    drawButtonGL(fontTex_, 328, 38, 434, 68, "ADD PHOTO", kTerracotta, kWhite, insideRect(mouseX_, mouseY_, 328, 38, 434, 68));
-    drawButtonGL(fontTex_, 440, 38, 514, 68, "SCENE",     kHoney,      kDark,  insideRect(mouseX_, mouseY_, 440, 38, 514, 68));
-    drawButtonGL(fontTex_, 520, 38, 598, 68, "FILTER",    kSage,       kDark,  insideRect(mouseX_, mouseY_, 520, 38, 598, 68));
-    drawButtonGL(fontTex_, 604, 38, 690, 68, "STICKER",   kMustard,    kDark,  insideRect(mouseX_, mouseY_, 604, 38, 690, 68));
-    drawButtonGL(fontTex_, 696, 38, 758, 68, "DROP",      kGreen,      kWhite, insideRect(mouseX_, mouseY_, 696, 38, 758, 68));
+    // 1. Top Cohesive Toolbar with Hover States (crisp integer scale = 2, no "SCENE" tab)
+    drawButtonGL(fontTex_,  74, 38, 178, 68, "CALENDAR",    kGreen,      kWhite, insideRect(mouseX_, mouseY_,  74, 38, 178, 68));
+    drawButtonGL(fontTex_, 184, 38, 250, 68, "PREV",        kPaper,      kDark,  insideRect(mouseX_, mouseY_, 184, 38, 250, 68));
+    drawButtonGL(fontTex_, 256, 38, 322, 68, "NEXT",        kPaper,      kDark,  insideRect(mouseX_, mouseY_, 256, 38, 322, 68));
+    drawButtonGL(fontTex_, 328, 38, 446, 68, "ADD PHOTO",   kTerracotta, kWhite, insideRect(mouseX_, mouseY_, 328, 38, 446, 68));
+    drawButtonGL(fontTex_, 452, 38, 540, 68, "FILTER",      kSage,       kDark,  insideRect(mouseX_, mouseY_, 452, 38, 540, 68));
+    drawButtonGL(fontTex_, 546, 38, 684, 68, "DEL STICKER", kMustard,    kDark,  insideRect(mouseX_, mouseY_, 546, 38, 684, 68));
+    drawButtonGL(fontTex_, 690, 38, 758, 68, "DROP",        kGreen,      kWhite, insideRect(mouseX_, mouseY_, 690, 38, 758, 68));
 
-    // 2. Left Side: Polaroid Photo Card with User's Own Photo or Daily Scene
+    // 2. Left Side: Polaroid Photo Card (Actual User Pictures Only)
     drawRectGL(110, 90, 464, 434, Color{64, 58, 48, 75});
     drawRectGL(102, 82, 456, 428, kWhite, kBrown);
 
     const gl::Texture& dayTex = textureForDay(layout);
-    if (dayTex.id != 0) {
+    bool hasCustom = isCustomPhotoPath(layout.photoPath) && dayTex.id != 0;
+    if (hasCustom) {
         FilterParams fp;
         fp.kind     = (FilterKind)std::clamp(layout.photoFilter, 0, (int)FILTER_COUNT - 1);
         fp.strength = layout.filterStrength;
@@ -1179,76 +1273,107 @@ void CalendarScrapbookApp::renderDayPageView(const DayLayout& layout, bool apply
                     * Mat3::scale(322.0 / (double)dayTex.width,
                                   256.0 / (double)dayTex.height);
         gl::drawTexture(dayTex, photoM, 1.0f, fp);
+    } else {
+        // Clean empty photo slot inviting the user to upload their own picture
+        bool slotHover = insideRect(mouseX_, mouseY_, 118, 96, 440, 352);
+        drawRectGL(118, 96, 440, 352, slotHover ? Color{248, 238, 220, 255} : Color{240, 228, 208, 255});
+        gl::drawPolyline(rectPoly(126, 104, 432, 344), Mat3::identity(),
+                         slotHover ? kTerracotta : Color{190, 166, 134, 255});
+
+        // Minimalist camera icon in center of empty Polaroid frame
+        drawRectGL(242, 162, 316, 214, kPaper, kBrown);
+        drawRectGL(262, 152, 296, 162, kHoney, kBrown);
+        Polygon lensOuter = makeRegularPolygon({279, 188}, 18, 24);
+        Polygon lensInner = makeRegularPolygon({279, 188}, 10, 20);
+        gl::drawPolygon(lensOuter, Mat3::identity(), kSage);
+        gl::drawPolyline(lensOuter, Mat3::identity(), kDark);
+        gl::drawPolygon(lensInner, Mat3::identity(), kDark);
+
+        drawCrispTextCentered(fontTex_, "NO PHOTO UPLOADED", 279, 244, 3, kDark, true, kWhite);
+        drawCrispTextCentered(fontTex_, "CLICK HERE OR ADD PHOTO", 279, 276, 2, kTerracotta);
+        drawCrispTextCentered(fontTex_, "OR DROP IMAGE FILE ON WINDOW", 279, 300, 2, kBrown);
     }
     gl::drawPolyline(rectPoly(118, 96, 440, 352), Mat3::identity(), kDark);
 
-    // Polaroid Bottom Caption Area + Quick "UPLOAD" button
-    bool hasCustom = isCustomPhotoPath(layout.photoPath);
-    int theme = parsePhotoTheme(layout.photoPath, layout.day);
-    std::string sceneTitle = hasCustom ? "MY PHOTO MEMORY" : photoThemeCaption(theme);
-    drawCrispTextCentered(fontTex_, sceneTitle, 240, 372, 3, kDark, true, kCream);
+    // Polaroid Bottom Caption Area + Quick "UPLOAD" / "CHANGE" button
+    std::string polaroidTitle = hasCustom ? "DAILY PHOTOGRAPH" : "UPLOAD YOUR PHOTO";
+    drawCrispText(fontTex_, polaroidTitle, 118, 368, 3, kDark, true, kCream);
 
     std::string subCaption = layout.dateText + "  " + shortFilterLabel(layout.photoFilter);
-    drawCrispText(fontTex_, subCaption, 118, 405, 2, kBrown);
+    drawCrispText(fontTex_, subCaption, 118, 402, 2, kBrown);
 
-    drawButtonGL(fontTex_, 366, 398, 448, 424, "UPLOAD", kPaper, kDark,
-                 insideRect(mouseX_, mouseY_, 366, 398, 448, 424));
+    drawButtonGL(fontTex_, 346, 396, 448, 422, hasCustom ? "CHANGE" : "UPLOAD", kPaper, kDark,
+                 insideRect(mouseX_, mouseY_, 346, 396, 448, 422));
 
-    // 3. Right Side: Lined Journal Note Card Backdrop for Stickers
+    // 3. Right Side: Interactive Multi-Line Daily Journal Text Area (x = 476..748, y = 82..428)
+    bool journalHover = insideRect(mouseX_, mouseY_, 476, 82, 748, 428);
     drawRectGL(482, 90, 754, 434, Color{64, 58, 48, 55});
-    drawRectGL(476, 82, 748, 428, kPaper, kBrown);
-    // Red vertical margin line & horizontal ruled notebook lines
-    drawRectGL(506, 82, 508, 428, Color{216, 130, 118, 160});
-    for (int ry = 128; ry <= 408; ry += 24) {
-        drawRectGL(478, ry, 746, ry + 1, Color{195, 205, 215, 160});
-    }
-    std::string noteHdr = "DAY " + std::to_string(layout.day) + " STICKER BOARD";
-    drawCrispTextCentered(fontTex_, noteHdr, 612, 102, 2, kDeepGreen, true, kWhite);
-
-    // 4. Sentence-Long Daily Description Box (x = 102..748, y = 442..526)
-    bool descHover = insideRect(mouseX_, mouseY_, 102, 442, 748, 526);
-    drawRectGL(108, 448, 754, 532, Color{64, 58, 48, 55});
-    Color descBg   = editingNote_ ? kWhite : kPaper;
-    Color descEdge = editingNote_ ? kTerracotta : (descHover ? kMustard : kBrown);
-    drawRectGL(102, 442, 748, 526, descBg, descEdge);
+    Color jBg   = editingNote_ ? kWhite : kPaper;
+    Color jEdge = editingNote_ ? kTerracotta : (journalHover ? kMustard : kBrown);
+    drawRectGL(476, 82, 748, 428, jBg, jEdge);
     if (editingNote_) {
-        gl::drawPolyline(rectPoly(103, 443, 747, 525), Mat3::identity(), kTerracotta);
+        gl::drawPolyline(rectPoly(477, 83, 747, 427), Mat3::identity(), kTerracotta);
     }
 
-    // Header strip inside description card
-    drawRectGL(103, 443, 747, 470, editingNote_ ? Color{249, 205, 125, 165} : Color{246, 224, 184, 180});
-    std::string descHdr = editingNote_
-                              ? "DAILY MEMORY DESCRIPTION - TYPING (ENTER WHEN DONE)"
-                              : "DAILY MEMORY DESCRIPTION - CLICK HERE OR PRESS T TO WRITE";
-    drawCrispText(fontTex_, descHdr, 114, 452, 2, editingNote_ ? kTerracotta : kDeepGreen);
+    // Journal header bar with WRITE/DONE and CLEAR buttons
+    drawRectGL(477, 83, 747, 116, editingNote_ ? Color{249, 205, 125, 175} : Color{246, 224, 184, 185});
+    std::string noteHdr = "DAY " + std::to_string(layout.day) + " JOURNAL";
+    drawCrispText(fontTex_, noteHdr, 486, 94, 2, editingNote_ ? kTerracotta : kDeepGreen);
 
-    // Mini "CLEAR" button on right of description header
-    drawButtonGL(fontTex_, 672, 446, 742, 468, "CLEAR", kWhite, kDark,
-                 insideRect(mouseX_, mouseY_, 672, 446, 742, 468));
+    drawButtonGL(fontTex_, 596, 86, 666, 112, editingNote_ ? "DONE" : "WRITE",
+                 editingNote_ ? kTerracotta : kHoney,
+                 editingNote_ ? kWhite : kDark,
+                 insideRect(mouseX_, mouseY_, 596, 86, 666, 112));
+    drawButtonGL(fontTex_, 672, 86, 742, 112, "CLEAR", kWhite, kDark,
+                 insideRect(mouseX_, mouseY_, 672, 86, 742, 112));
 
-    // Ruled lines for the 2-line sentence area
-    drawRectGL(112, 494, 738, 495, Color{195, 205, 215, 180});
-    drawRectGL(112, 516, 738, 517, Color{195, 205, 215, 180});
+    // Red vertical margin line & 10 horizontal ruled notebook lines
+    drawRectGL(500, 116, 502, 427, Color{216, 130, 118, 160});
+    for (int lineIdx = 0; lineIdx < 10; ++lineIdx) {
+        int ry = 148 + lineIdx * 24;
+        drawRectGL(478, ry, 746, ry + 1, Color{195, 205, 215, 175});
+    }
 
-    std::string shownText = layout.description;
-    if (shownText.empty() && !editingNote_) {
-        drawCrispText(fontTex_, "CLICK HERE TO ADD A SHORT DESCRIPTION FOR THIS DAY...",
-                      116, 480, 2, kBrown);
+    // Render wrapped journal lines inside the lined journal card
+    if (layout.description.empty() && !editingNote_) {
+        drawCrispText(fontTex_, "CLICK HERE OR PRESS T", 508, 134, 2, kBrown);
+        drawCrispText(fontTex_, "TO WRITE TODAY'S JOURNAL...", 508, 158, 2, kBrown);
     } else {
-        auto [line1, line2] = wrapTwoLines(shownText, 52);
-        drawCrispText(fontTex_, line1, 116, 480, 2, kDark);
-        if (!line2.empty()) {
-            drawCrispText(fontTex_, line2, 116, 502, 2, kDark);
+        std::vector<std::string> jLines = wrapJournalLines(layout.description, 26, 10);
+        for (size_t ln = 0; ln < jLines.size(); ++ln) {
+            double ly = 134.0 + ln * 24.0;
+            drawCrispText(fontTex_, jLines[ln], 508.0, ly, 2, kDark);
         }
-
-        // Blinking text cursor when editing
         if (editingNote_ && std::fmod(pulseClock_, 1.0) < 0.55) {
-            bool onSecondLine = !line2.empty() || (line1.size() >= 52);
-            const std::string& curLine = onSecondLine ? line2 : line1;
-            double cx = 116.0 + crispTextWidth(curLine, 2) + 3.0;
-            double cy = onSecondLine ? 500.0 : 478.0;
+            size_t lastIdx = jLines.empty() ? 0 : (jLines.size() - 1);
+            const std::string& curLine = jLines[lastIdx];
+            double cx = 508.0 + crispTextWidth(curLine, 2) + 3.0;
+            double cy = 132.0 + lastIdx * 24.0;
             drawRectGL(cx, cy, cx + 3.0, cy + 13.0, kTerracotta);
         }
+    }
+
+    // 4. Bottom Visual Sticker Palette Bar (x = 102..748, y = 442..526)
+    drawRectGL(108, 448, 754, 532, Color{64, 58, 48, 55});
+    drawRectGL(102, 442, 748, 526, kPaper, kBrown);
+    drawRectGL(103, 443, 747, 465, Color{246, 224, 184, 190});
+    drawCrispText(fontTex_, "STICKER PALETTE - CLICK A SHAPE TO ADD   (RIGHT-CLICK OR DEL TO REMOVE)",
+                  112, 450, 2, kDeepGreen);
+
+    for (int s = 0; s < kNumPaletteSlots; ++s) {
+        double sx0, sy0, sx1, sy1;
+        paletteSlotRect(s, sx0, sy0, sx1, sy1);
+        bool sHover = insideRect(mouseX_, mouseY_, sx0, sy0, sx1, sy1);
+        drawRectGL(sx0, sy0, sx1, sy1, sHover ? kHoney : kWhite, sHover ? kTerracotta : kBrown);
+
+        const PaletteSlot& slot = kStickerPalette[s];
+        Polygon sp = buildShapePolygon(slot.kind);
+        Mat3 previewM = Mat3::translate((sx0 + sx1) * 0.5, sy0 + 20.0)
+                      * Mat3::scale(slot.previewScale, slot.previewScale);
+        drawConcavePolygonGL(sp, previewM, slot.fill);
+        gl::drawPolyline(sp, previewM, slot.edge);
+
+        drawCrispTextCentered(fontTex_, slot.label, (sx0 + sx1) * 0.5, sy1 - 9.0, 2, kDark);
     }
 
     // 5. Z-ordered Stickers, Washi Tape & Notched Date Stamp with Live Drop-and-Settle
@@ -1293,22 +1418,27 @@ void CalendarScrapbookApp::renderDayPageView(const DayLayout& layout, bool apply
             gl::drawStampText(fontTex_, dtxt, -tw * 0.5f,        -7.5f,        sc, kTerracotta, M);
         }
 
-        // Selection frame around active sticker
+        // Selection frame around active sticker + clickable [X] delete button at top-right corner
         if (i == selectedElem_ && !pageTurnAnim_.active) {
             Polygon wp = transformPolygon(base, M);
             Vec2 mn, mx;
             boundingBox(wp, mn, mx);
             Polygon selBox = rectPoly(mn.x - 5, mn.y - 5, mx.x + 5, mx.y + 5);
             gl::drawPolyline(selBox, Mat3::identity(), kTerracotta);
-            drawRectGL(mx.x + 1, mx.y + 1, mx.x + 9, mx.y + 9, kTerracotta, kWhite);
+
+            // Red [X] delete badge on top-right of selected sticker
+            double bx0 = mx.x - 4.0, by0 = mn.y - 14.0;
+            double bx1 = mx.x + 14.0, by1 = mn.y + 4.0;
+            drawRectGL(bx0, by0, bx1, by1, kTerracotta, kWhite);
+            drawCrispTextCentered(fontTex_, "X", (bx0 + bx1) * 0.5, (by0 + by1) * 0.5, 2, kWhite);
         }
     }
 
     // 6. Cohesive Bottom Status Ribbon (crisp integer scale = 2)
     drawRectGL(74, 536, 756, 560, kDeepGreen, kBrown);
     std::string statusMsg = editingNote_
-        ? "TYPE YOUR SENTENCE   BACKSPACE DELETE   ENTER FINISH   AUTOMATICALLY SAVED"
-        : "U ADD PHOTO   T WRITE DESCRIPTION   DRAG STICKER   F FILTER   B CALENDAR";
+        ? "WRITING JOURNAL   BACKSPACE DELETE   ENTER OR CLICK DONE TO FINISH"
+        : "U ADD PHOTO   CLICK PALETTE TO ADD STICKER   DEL OR X REMOVE STICKER";
     drawCrispTextCentered(fontTex_, statusMsg, 415, 548, 2, kWhite, true, kDark);
 }
 

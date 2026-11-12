@@ -26,8 +26,6 @@ enum class ShapeKind {
     DATE_STAMP
 };
 
-constexpr int kNumPhotoThemes = 8;
-
 // Convert between ShapeKind and its text token for layout files.
 std::string shapeKindToString(ShapeKind kind);
 ShapeKind   shapeKindFromString(const std::string& token, bool* ok = nullptr);
@@ -59,11 +57,11 @@ struct DayLayout {
     int         year           = 2026;
     int         month          = 10;
     int         day            = 5;
-    std::string photoPath      = "theme:4";
-    int         photoFilter    = 0;      // 0 = FILTER_NONE (shows vivid daily photo by default; F cycles sepia/etc.)
+    std::string photoPath      = "none"; // Path to user's uploaded photo file ("none" if no photo uploaded yet)
+    int         photoFilter    = 0;      // 0 = FILTER_NONE (F cycles sepia/grayscale/etc.)
     float       filterStrength = 1.0f;
     std::string dateText       = "05-10-2026";
-    std::string description    = "MORNING COFFEE AND A QUIET WALK BEFORE CLASS.";
+    std::string description    = "";     // User's daily journal text
     std::vector<SavedElement> elements;
 
     void sortByZ();
@@ -72,16 +70,9 @@ struct DayLayout {
 // Format "DD-MM-YYYY" for a date stamp.
 std::string formatDateStamp(int year, int month, int day);
 
-// Daily photo theme helpers (0 .. kNumPhotoThemes-1):
-//   0: SUNSET HIKE    1: STARRY CAMP    2: OCEAN BREEZE   3: AUTUMN WALK
-//   4: CAFE MORNING   5: FLOWER FIELD   6: CITY LIGHTS    7: RAINBOW DAY
-int         photoThemeForDay(int year, int month, int day);
-int         parsePhotoTheme(const std::string& photoPath, int fallbackDay = 1);
-std::string makePhotoThemeSpec(int themeIndex);
-std::string photoThemeCaption(int themeIndex);
-std::string defaultDayDescription(int year, int month, int day);
+// Photo helpers — checks whether a day has a real user-uploaded image file.
 bool        isCustomPhotoPath(const std::string& photoPath);
-Framebuffer makeDayPhoto(int themeIndex, int w = 360, int h = 270);
+bool        hasActualPhotoFile(const DayLayout& layout);
 Framebuffer resolveDayPhoto(const DayLayout& layout, int w = 360, int h = 270);
 
 // Import a user image file (.bmp, .ppm, .png, .jpg, .jpeg) into `outFb` (resized
