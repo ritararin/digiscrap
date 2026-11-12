@@ -60,6 +60,7 @@ public:
     // Input callbacks (coordinates in 800x600 logical space).
     void onMouseButton(int button, int action, double mx, double my);
     void onCursorPos(double mx, double my);
+    void onScroll(double xoffset, double yoffset);
     void onKey(int key, int action);
     void onChar(unsigned int codepoint);
     void onDropFile(const std::string& filePath);
@@ -73,6 +74,8 @@ public:
     bool promptAndUploadPhoto();
     void addStickerFromPalette(int paletteIndex);
     bool removeSelectedOrLastSticker();
+    bool rotateSelectedSticker(double deltaDegrees);
+    bool scaleSelectedSticker(double factor);
     void setEditingDescription(bool editing);
     bool isEditingDescription() const { return editingNote_; }
     void setDayDescription(const std::string& text);
@@ -126,11 +129,23 @@ private:
     double         mouseY_         = 0.0;
     double         pulseClock_     = 0.0;
 
+    enum DragMode {
+        DRAG_NONE   = 0,
+        DRAG_MOVE   = 1,
+        DRAG_ROTATE = 2,
+        DRAG_SCALE  = 3
+    };
+
     DayLayout      currentDay_{};
-    int            selectedElem_   = -1;
-    bool           dragging_       = false;
-    bool           editingNote_    = false;
+    int            selectedElem_    = -1;
+    bool           dragging_        = false;
+    DragMode       dragMode_        = DRAG_NONE;
+    bool           editingNote_     = false;
     Vec2           dragOffset_{0, 0};
+    double         dragStartAngle_  = 0.0;
+    double         initialRotation_ = 0.0;
+    double         dragStartDist_   = 1.0;
+    Vec2           initialScale_{1.0, 1.0};
 
     HighlightMoveState highlightAnim_{};
     DropSettleState    dropAnim_{};

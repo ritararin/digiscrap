@@ -199,6 +199,48 @@ static void testOption5StorageAndAnimations() {
         CHECK(app.currentDayLayout().elements.size() == countBefore + 1,
               "clicking DEL STICKER removes the selected sticker");
 
+        // Test rotating and scaling the remaining HEART sticker via ROT+ / SIZE+ buttons,
+        // mouse scroll wheel, and dragging the [R] and [S] corner handles
+        double rotBefore   = app.currentDayLayout().elements.back().xform.rotation;
+        double scaleBefore = app.currentDayLayout().elements.back().xform.scale.x;
+        app.onMouseButton(0, 1, 555, 454); // Click "ROT +" button in palette header
+        CHECK(near(app.currentDayLayout().elements.back().xform.rotation, rotBefore + 15.0, 1e-4),
+              "clicking ROT + button rotates the selected sticker by +15 degrees");
+        app.onMouseButton(0, 1, 705, 454); // Click "SIZE +" button in palette header
+        CHECK(app.currentDayLayout().elements.back().xform.scale.x > scaleBefore,
+              "clicking SIZE + button scales up the selected sticker");
+
+        double scaleAfterBtn = app.currentDayLayout().elements.back().xform.scale.x;
+        app.onScroll(0.0, 1.0); // Scroll wheel up
+        CHECK(app.currentDayLayout().elements.back().xform.scale.x > scaleAfterBtn,
+              "scrolling mouse wheel up scales the selected sticker larger");
+
+        // Drag the top-left [R] Rotate handle and bottom-right [S] Scale handle
+        {
+            const SavedElement& sel = app.currentDayLayout().elements.back();
+            Polygon wp = transformPolygon(buildShapePolygon(sel.kind), sel.xform.toMat3());
+            Vec2 bmin, bmax;
+            boundingBox(wp, bmin, bmax);
+            double rot0 = sel.xform.rotation;
+            app.onMouseButton(0, 1, bmin.x - 4.0, bmin.y - 4.0); // Press [R] handle
+            app.onCursorPos(sel.xform.position.x + 80.0, sel.xform.position.y);
+            app.onMouseButton(0, 0, sel.xform.position.x + 80.0, sel.xform.position.y); // Release
+            CHECK(std::abs(app.currentDayLayout().elements.back().xform.rotation - rot0) > 1.0,
+                  "dragging the top-left [R] handle rotates the selected object around its centroid");
+        }
+        {
+            const SavedElement& sel = app.currentDayLayout().elements.back();
+            Polygon wp = transformPolygon(buildShapePolygon(sel.kind), sel.xform.toMat3());
+            Vec2 bmin, bmax;
+            boundingBox(wp, bmin, bmax);
+            double sc0 = sel.xform.scale.x;
+            app.onMouseButton(0, 1, bmax.x + 4.0, bmax.y + 4.0); // Press [S] handle
+            app.onCursorPos(bmax.x + 60.0, bmax.y + 60.0);
+            app.onMouseButton(0, 0, bmax.x + 60.0, bmax.y + 60.0); // Release
+            CHECK(app.currentDayLayout().elements.back().xform.scale.x > sc0,
+                  "dragging the bottom-right [S] handle scales the selected object proportionally");
+        }
+
         // Upload user's own photo file for Day 5
         CHECK(app.setCustomPhotoFromFile(userPicFile),
               "setCustomPhotoFromFile imports and saves user picture for Day 5");

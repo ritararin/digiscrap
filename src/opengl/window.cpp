@@ -66,6 +66,11 @@ static void dropCB(GLFWwindow*, int count, const char** paths) {
         g_callbacks->onDrop(std::string(paths[0]));
 }
 
+static void scrollCB(GLFWwindow*, double xoffset, double yoffset) {
+    if (g_callbacks && g_callbacks->onScroll)
+        g_callbacks->onScroll(xoffset, yoffset);
+}
+
 // ---- Public API -------------------------------------------------------
 
 GLFWwindow* createWindow(int width, int height, const std::string& title) {
@@ -123,6 +128,7 @@ void runLoop(GLFWwindow* window, const WindowCallbacks& cb) {
     glfwSetCursorPosCallback(window, cursorPosCB);
     glfwSetCharCallback(window, charCB);
     glfwSetDropCallback(window, dropCB);
+    glfwSetScrollCallback(window, scrollCB);
 
     double lastTime = glfwGetTime();
 

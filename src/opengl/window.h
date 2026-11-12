@@ -21,6 +21,7 @@ struct WindowCallbacks {
     std::function<void(double x, double y)>                         onCursorPos;   // cursor position
     std::function<void(unsigned int codepoint)>                     onChar;        // typed character
     std::function<void(const std::string& filePath)>                onDrop;        // dropped file path
+    std::function<void(double xoffset, double yoffset)>             onScroll;      // mouse scroll wheel
 };
 
 // Create the GLFW window + GL context.  Returns nullptr on failure.

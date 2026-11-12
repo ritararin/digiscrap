@@ -508,6 +508,32 @@ bool CalendarScrapbookApp::removeSelectedOrLastSticker() {
     currentDay_.elements.erase(currentDay_.elements.begin() + idxToRemove);
     selectedElem_ = -1;
     dragging_     = false;
+    dragMode_     = DRAG_NONE;
+    saveCurrentDay();
+    return true;
+}
+
+bool CalendarScrapbookApp::rotateSelectedSticker(double deltaDegrees) {
+    if (currentDay_.elements.empty()) return false;
+    if (selectedElem_ < 0 || selectedElem_ >= (int)currentDay_.elements.size()) {
+        selectedElem_ = (int)currentDay_.elements.size() - 1;
+    }
+    SavedElement& sel = currentDay_.elements[selectedElem_];
+    sel.xform.rotation = std::fmod(sel.xform.rotation + deltaDegrees, 360.0);
+    editingNote_ = false;
+    saveCurrentDay();
+    return true;
+}
+
+bool CalendarScrapbookApp::scaleSelectedSticker(double factor) {
+    if (currentDay_.elements.empty()) return false;
+    if (selectedElem_ < 0 || selectedElem_ >= (int)currentDay_.elements.size()) {
+        selectedElem_ = (int)currentDay_.elements.size() - 1;
+    }
+    SavedElement& sel = currentDay_.elements[selectedElem_];
+    sel.xform.scale.x = std::clamp(sel.xform.scale.x * factor, 0.25, 3.0);
+    sel.xform.scale.y = std::clamp(sel.xform.scale.y * factor, 0.25, 3.0);
+    editingNote_ = false;
     saveCurrentDay();
     return true;
 }
@@ -701,6 +727,7 @@ void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, doub
     if (action == 0) { // GLFW_RELEASE
         if (dragging_) {
             dragging_ = false;
+            dragMode_ = DRAG_NONE;
             saveCurrentDay();
         }
         return;
@@ -769,23 +796,65 @@ void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, doub
         return;
     }
 
-    // ---- 1. Check if the selected sticker's red [X] delete badge was clicked ----
+    // ---- 1. Check if the selected object's [X] Delete, [R] Rotate, or [S] Scale handle was clicked ----
     if (selectedElem_ >= 0 && selectedElem_ < (int)currentDay_.elements.size()) {
         const SavedElement& sel = currentDay_.elements[selectedElem_];
         Polygon wp = transformPolygon(buildShapePolygon(sel.kind), sel.xform.toMat3());
         Vec2 bmin, bmax;
         boundingBox(wp, bmin, bmax);
+
+        // Top-Right Red [X] Delete Handle
         if (insideRect(mx, my, bmax.x - 6.0, bmin.y - 14.0, bmax.x + 14.0, bmin.y + 6.0)) {
             currentDay_.elements.erase(currentDay_.elements.begin() + selectedElem_);
             selectedElem_ = -1;
             dragging_     = false;
+            dragMode_     = DRAG_NONE;
             saveCurrentDay();
+            return;
+        }
+        // Top-Left Mustard [R] Rotate Handle (drag around centroid)
+        if (insideRect(mx, my, bmin.x - 14.0, bmin.y - 14.0, bmin.x + 6.0, bmin.y + 6.0)) {
+            Vec2 c = sel.xform.position;
+            dragStartAngle_  = std::atan2(my - c.y, mx - c.x);
+            initialRotation_ = sel.xform.rotation;
+            dragging_        = true;
+            dragMode_        = DRAG_ROTATE;
+            editingNote_     = false;
+            return;
+        }
+        // Bottom-Right Green [S] Scale/Resize Handle (drag to scale proportionally from centroid)
+        if (insideRect(mx, my, bmax.x - 6.0, bmax.y - 6.0, bmax.x + 14.0, bmax.y + 14.0)) {
+            Vec2 c = sel.xform.position;
+            dragStartDist_ = std::max(8.0, std::hypot(mx - c.x, my - c.y));
+            initialScale_  = sel.xform.scale;
+            dragging_      = true;
+            dragMode_      = DRAG_SCALE;
+            editingNote_   = false;
             return;
         }
     }
 
-    // ---- 2. Bottom Visual Sticker Palette (x = 102..748, y = 442..526) ----
+    // ---- 2. Bottom Visual Sticker Palette + ROT-/ROT+/SIZE-/SIZE+ Buttons (x = 102..748, y = 442..526) ----
     if (insideRect(mx, my, 102, 442, 748, 526)) {
+        // Check header bar Transform Control Buttons (y = 444..465)
+        if (insideRect(mx, my, 452, 444, 518, 465)) {
+            rotateSelectedSticker(-15.0);
+            return;
+        }
+        if (insideRect(mx, my, 524, 444, 590, 465)) {
+            rotateSelectedSticker(+15.0);
+            return;
+        }
+        if (insideRect(mx, my, 596, 444, 668, 465)) {
+            scaleSelectedSticker(0.88);
+            return;
+        }
+        if (insideRect(mx, my, 674, 444, 744, 465)) {
+            scaleSelectedSticker(1.14);
+            return;
+        }
+
+        // Check 8 shape slots
         for (int s = 0; s < kNumPaletteSlots; ++s) {
             double sx0, sy0, sx1, sy1;
             paletteSlotRect(s, sx0, sy0, sx1, sy1);
@@ -803,6 +872,7 @@ void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, doub
         editingNote_  = true;
         selectedElem_ = -1;
         dragging_     = false;
+        dragMode_     = DRAG_NONE;
         saveCurrentDay();
         return;
     }
@@ -810,6 +880,7 @@ void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, doub
         editingNote_  = !editingNote_;
         selectedElem_ = -1;
         dragging_     = false;
+        dragMode_     = DRAG_NONE;
         saveCurrentDay();
         return;
     }
@@ -840,6 +911,7 @@ void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, doub
         currentDay_.sortByZ();
         selectedElem_ = (int)currentDay_.elements.size() - 1;
         dragging_     = true;
+        dragMode_     = DRAG_MOVE;
         dragOffset_   = {
             currentDay_.elements[selectedElem_].xform.position.x - mx,
             currentDay_.elements[selectedElem_].xform.position.y - my
@@ -853,6 +925,7 @@ void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, doub
         editingNote_  = true;
         selectedElem_ = -1;
         dragging_     = false;
+        dragMode_     = DRAG_NONE;
         return;
     }
 
@@ -869,6 +942,7 @@ void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, doub
     }
     selectedElem_ = -1;
     dragging_     = false;
+    dragMode_     = DRAG_NONE;
 }
 
 void CalendarScrapbookApp::onCursorPos(double mx, double my) {
@@ -880,11 +954,41 @@ void CalendarScrapbookApp::onCursorPos(double mx, double my) {
     }
     if (view_ == VIEW_DAY_PAGE && dragging_ &&
         selectedElem_ >= 0 && selectedElem_ < (int)currentDay_.elements.size()) {
-        currentDay_.elements[selectedElem_].xform.position = {
-            std::clamp(mx + dragOffset_.x, 85.0, 755.0),
-            std::clamp(my + dragOffset_.y, 75.0, 525.0)
-        };
+        SavedElement& sel = currentDay_.elements[selectedElem_];
+        if (dragMode_ == DRAG_ROTATE) {
+            Vec2 c = sel.xform.position;
+            double curAngle = std::atan2(my - c.y, mx - c.x);
+            double deltaDeg = (curAngle - dragStartAngle_) * 180.0 / M_PI;
+            sel.xform.rotation = initialRotation_ + deltaDeg;
+        } else if (dragMode_ == DRAG_SCALE) {
+            Vec2 c = sel.xform.position;
+            double curDist = std::hypot(mx - c.x, my - c.y);
+            double ratio   = curDist / std::max(8.0, dragStartDist_);
+            sel.xform.scale.x = std::clamp(initialScale_.x * ratio, 0.25, 3.0);
+            sel.xform.scale.y = std::clamp(initialScale_.y * ratio, 0.25, 3.0);
+        } else {
+            sel.xform.position = {
+                std::clamp(mx + dragOffset_.x, 85.0, 755.0),
+                std::clamp(my + dragOffset_.y, 75.0, 525.0)
+            };
+        }
     }
+}
+
+void CalendarScrapbookApp::onScroll(double /*xoffset*/, double yoffset) {
+    if (view_ != VIEW_DAY_PAGE || std::abs(yoffset) < 1e-4) return;
+    // If no object is selected yet, check if the mouse cursor is hovering over an object and select it
+    if (selectedElem_ < 0 || selectedElem_ >= (int)currentDay_.elements.size()) {
+        Vec2 pt{mouseX_, mouseY_};
+        for (int i = (int)currentDay_.elements.size() - 1; i >= 0; --i) {
+            if (currentDay_.elements[i].toSticker().hitTest(pt)) {
+                selectedElem_ = i;
+                break;
+            }
+        }
+    }
+    double factor = (yoffset > 0.0) ? 1.10 : 0.91;
+    scaleSelectedSticker(factor);
 }
 
 void CalendarScrapbookApp::onKey(int key, int action) {
@@ -987,25 +1091,21 @@ void CalendarScrapbookApp::onKey(int key, int action) {
         return;
     }
 
-    if (selectedElem_ >= 0 && selectedElem_ < (int)currentDay_.elements.size()) {
-        SavedElement& sel = currentDay_.elements[selectedElem_];
-        bool changed = false;
-        if (key == 81) { // 'Q' rotate counter-clockwise
-            sel.xform.rotation -= 8.0;
-            changed = true;
-        } else if (key == 69) { // 'E' rotate clockwise
-            sel.xform.rotation += 8.0;
-            changed = true;
-        } else if (key == 61 || key == 334) { // '=' / '+' scale up
-            sel.xform.scale.x = std::min(2.5, sel.xform.scale.x * 1.1);
-            sel.xform.scale.y = std::min(2.5, sel.xform.scale.y * 1.1);
-            changed = true;
-        } else if (key == 45 || key == 333) { // '-' scale down
-            sel.xform.scale.x = std::max(0.35, sel.xform.scale.x * 0.9);
-            sel.xform.scale.y = std::max(0.35, sel.xform.scale.y * 0.9);
-            changed = true;
-        }
-        if (changed) saveCurrentDay();
+    if (key == 81 || key == 263) { // 'Q' or Left Arrow -> rotate counter-clockwise
+        rotateSelectedSticker(-10.0);
+        return;
+    }
+    if (key == 69 || key == 262) { // 'E' or Right Arrow -> rotate clockwise
+        rotateSelectedSticker(+10.0);
+        return;
+    }
+    if (key == 61 || key == 334 || key == 265) { // '=' / '+' or Up Arrow -> scale up
+        scaleSelectedSticker(1.12);
+        return;
+    }
+    if (key == 45 || key == 333 || key == 264) { // '-' or Down Arrow -> scale down
+        scaleSelectedSticker(0.89);
+        return;
     }
 }
 
@@ -1353,12 +1453,17 @@ void CalendarScrapbookApp::renderDayPageView(const DayLayout& layout, bool apply
         }
     }
 
-    // 4. Bottom Visual Sticker Palette Bar (x = 102..748, y = 442..526)
+    // 4. Bottom Visual Sticker Palette Bar + Rotate/Scale Controls (x = 102..748, y = 442..526)
     drawRectGL(108, 448, 754, 532, Color{64, 58, 48, 55});
     drawRectGL(102, 442, 748, 526, kPaper, kBrown);
-    drawRectGL(103, 443, 747, 465, Color{246, 224, 184, 190});
-    drawCrispText(fontTex_, "STICKER PALETTE - CLICK A SHAPE TO ADD   (RIGHT-CLICK OR DEL TO REMOVE)",
-                  112, 450, 2, kDeepGreen);
+    drawRectGL(103, 443, 747, 466, Color{246, 224, 184, 190});
+    drawCrispText(fontTex_, "STICKER PALETTE - CLICK TO ADD", 110, 450, 2, kDeepGreen);
+
+    // Clickable Rotate & Scale buttons on the right of the palette header bar
+    drawButtonGL(fontTex_, 452, 444, 518, 465, "ROT -",  kHoney, kDark, insideRect(mouseX_, mouseY_, 452, 444, 518, 465));
+    drawButtonGL(fontTex_, 524, 444, 590, 465, "ROT +",  kHoney, kDark, insideRect(mouseX_, mouseY_, 524, 444, 590, 465));
+    drawButtonGL(fontTex_, 596, 444, 668, 465, "SIZE -", kSage,  kDark, insideRect(mouseX_, mouseY_, 596, 444, 668, 465));
+    drawButtonGL(fontTex_, 674, 444, 744, 465, "SIZE +", kSage,  kDark, insideRect(mouseX_, mouseY_, 674, 444, 744, 465));
 
     for (int s = 0; s < kNumPaletteSlots; ++s) {
         double sx0, sy0, sx1, sy1;
@@ -1418,7 +1523,7 @@ void CalendarScrapbookApp::renderDayPageView(const DayLayout& layout, bool apply
             gl::drawStampText(fontTex_, dtxt, -tw * 0.5f,        -7.5f,        sc, kTerracotta, M);
         }
 
-        // Selection frame around active sticker + clickable [X] delete button at top-right corner
+        // Selection frame around active object + [R] Rotate, [X] Delete, and [S] Scale handles
         if (i == selectedElem_ && !pageTurnAnim_.active) {
             Polygon wp = transformPolygon(base, M);
             Vec2 mn, mx;
@@ -1426,11 +1531,23 @@ void CalendarScrapbookApp::renderDayPageView(const DayLayout& layout, bool apply
             Polygon selBox = rectPoly(mn.x - 5, mn.y - 5, mx.x + 5, mx.y + 5);
             gl::drawPolyline(selBox, Mat3::identity(), kTerracotta);
 
-            // Red [X] delete badge on top-right of selected sticker
-            double bx0 = mx.x - 4.0, by0 = mn.y - 14.0;
+            // Top-Left Mustard [R] Rotate Handle (drag to rotate around centroid)
+            double rx0 = mn.x - 14.0, ry0 = mn.y - 14.0;
+            double rx1 = mn.x + 4.0,  ry1 = mn.y + 4.0;
+            drawRectGL(rx0, ry0, rx1, ry1, kMustard, kDark);
+            drawCrispTextCentered(fontTex_, "R", (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, 2, kDark);
+
+            // Top-Right Red [X] Delete Handle (click to delete)
+            double bx0 = mx.x - 4.0,  by0 = mn.y - 14.0;
             double bx1 = mx.x + 14.0, by1 = mn.y + 4.0;
             drawRectGL(bx0, by0, bx1, by1, kTerracotta, kWhite);
             drawCrispTextCentered(fontTex_, "X", (bx0 + bx1) * 0.5, (by0 + by1) * 0.5, 2, kWhite);
+
+            // Bottom-Right Green [S] Scale Handle (drag to resize proportionally)
+            double sx0 = mx.x - 4.0,  sy0 = mx.y - 4.0;
+            double sx1 = mx.x + 14.0, sy1 = mx.y + 14.0;
+            drawRectGL(sx0, sy0, sx1, sy1, kGreen, kWhite);
+            drawCrispTextCentered(fontTex_, "S", (sx0 + sx1) * 0.5, (sy0 + sy1) * 0.5, 2, kWhite);
         }
     }
 
@@ -1438,7 +1555,7 @@ void CalendarScrapbookApp::renderDayPageView(const DayLayout& layout, bool apply
     drawRectGL(74, 536, 756, 560, kDeepGreen, kBrown);
     std::string statusMsg = editingNote_
         ? "WRITING JOURNAL   BACKSPACE DELETE   ENTER OR CLICK DONE TO FINISH"
-        : "U ADD PHOTO   CLICK PALETTE TO ADD STICKER   DEL OR X REMOVE STICKER";
+        : "DRAG R TO ROTATE   DRAG S OR SCROLL TO SCALE   CLICK X OR DEL TO REMOVE";
     drawCrispTextCentered(fontTex_, statusMsg, 415, 548, 2, kWhite, true, kDark);
 }
 

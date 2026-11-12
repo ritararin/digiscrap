@@ -1204,6 +1204,12 @@ int main(int argc, char* argv[]) {
         }
     };
 
+    cb.onScroll = [&currentMode, &calendarApp](double xoff, double yoff) {
+        if (currentMode == 5) {
+            calendarApp.onScroll(xoff, yoff);
+        }
+    };
+
     cb.onChar = [&currentMode, &calendarApp](unsigned int codepoint) {
         if (currentMode == 5) {
             calendarApp.onChar(codepoint);
