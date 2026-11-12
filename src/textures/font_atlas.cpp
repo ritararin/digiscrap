@@ -3,7 +3,7 @@
 #include <cstring>
 #include <cctype>
 
-const char* kFontChars = " 0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const char* kFontChars = " 0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ.,!?':/";
 
 int fontAtlasWidth() { return (int)std::strlen(kFontChars) * kCellW; }
 

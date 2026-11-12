@@ -43,6 +43,13 @@ inline void drawText(Framebuffer& fb, int x, int y, const std::string& s, int sc
         uint16_t bits = 0;
         if (ch >= '0' && ch <= '9') bits = digits[ch - '0'];
         else if (ch == '-')         bits = 0x01C0;
+        else if (ch == '.')         bits = 0x0002;
+        else if (ch == ',')         bits = 0x0014;
+        else if (ch == '!')         bits = 0x2482;
+        else if (ch == '?')         bits = 0x7092;
+        else if (ch == '\'')        bits = 0x2400;
+        else if (ch == ':')         bits = 0x0410;
+        else if (ch == '/')         bits = 0x1248;
         bool isUppercase = ch >= 'A' && ch <= 'Z';
         const int glyphWidth = 3;
         const int glyphHeight = 5;

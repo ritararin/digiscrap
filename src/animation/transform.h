@@ -29,17 +29,15 @@ struct Transform {
     Polygon apply(const Polygon& p) const { return transformPolygon(p, toMat3()); }
 };
 
-inline Vec2 polygonCentroid(const Polygon& p) {
-    Vec2 c{0, 0};
-    if (p.empty()) return c;
-    for (auto& v : p) { c.x += v.x; c.y += v.y; }
-    return { c.x / p.size(), c.y / p.size() };
-}
-
 // Rest pose for a polygon: pivot and position both at its centroid.
 inline Transform restPose(const Polygon& p) {
+    Vec2 c{0, 0};
+    if (!p.empty()) {
+        for (auto& v : p) { c.x += v.x; c.y += v.y; }
+        c = { c.x / p.size(), c.y / p.size() };
+    }
     Transform t;
-    t.pivot = t.position = polygonCentroid(p);
+    t.pivot = t.position = c;
     return t;
 }
 

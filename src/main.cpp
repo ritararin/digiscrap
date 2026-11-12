@@ -23,6 +23,7 @@
 #include <cstdio>
 #include "textures/image_loader.h"
 #include "textures/font_atlas.h"
+#include "calendar/calendar_gl.h"
 
 
 // ---------- shared palette (taken from the project deck) ----------
@@ -1100,6 +1101,9 @@ int main(int argc, char* argv[]) {
     std::cout << "  [4] Hardware Transformed Polygons (Mat3 to 4x4 Affine Shader)\n";
     std::cout << "  [5] Textured Photo + Filters + Tape + Date Stamp (Option 3)\n";
     std::cout << "      [F] next filter  [Up/Down] filter strength   (run with --photo file.bmp|.ppm)\n";
+    std::cout << "  [6] Interactive Multi-Day Calendar, Live Animations & Saving (Option 5)\n";
+    std::cout << "      Calendar: Click day / [Enter] open page, [Arrows] glide highlight, [</> ] month\n";
+    std::cout << "      Day Page: Drag sticker, [A] add sticker, [D] drop anim, [N/P] page turn, [B] back\n";
     std::cout << "  [Space] Cycle modes\n";
     std::cout << "  [ESC] Exit\n";
     std::cout << "=======================================================\n\n";
@@ -1148,7 +1152,11 @@ int main(int argc, char* argv[]) {
     photoFilter.kind = FILTER_SEPIA;
     photoFilter.strength = 1.0f;
 
-    int currentMode = 0; // 0: Triangle, 1: Day page fallback, 2: Calendar fallback, 3: Hardware polygons
+    // ---- Option 5: Interactive Multi-Day Calendar, Live Animations & Saving ----
+    CalendarScrapbookApp calendarApp;
+    calendarApp.init(photoTex, fontTex, "saves", photoPath.empty() ? "demo" : photoPath);
+
+    int currentMode = 5; // Default to Option 5 interactive calendar & scrapbook (1..6 switch modes)
     double elapsedAnim = 0.0;
 
     gl::WindowCallbacks cb;
@@ -1157,24 +1165,68 @@ int main(int argc, char* argv[]) {
         gl::setTextureProjection(w, h);
     };
 
-    cb.onKey = [&currentMode, &photoFilter](int key, int action) {
+    cb.onKey = [&currentMode, &photoFilter, &calendarApp](int key, int action) {
+        if (currentMode == 5 && calendarApp.isEditingDescription()) {
+            calendarApp.onKey(key, action);
+            return;
+        }
+        if (action == 1) { // GLFW_PRESS
+            if (key == 49)      { currentMode = 0; return; }            // '1'
+            else if (key == 50) { currentMode = 1; return; }            // '2'
+            else if (key == 51) { currentMode = 2; return; }            // '3'
+            else if (key == 52) { currentMode = 3; return; }            // '4'
+            else if (key == 53) { currentMode = 4; return; }            // '5'
+            else if (key == 54) { currentMode = 5; return; }            // '6'
+            else if (key == 32) { currentMode = (currentMode + 1) % 6; return; } // Space
+        }
+        if (currentMode == 5) {
+            calendarApp.onKey(key, action);
+            return;
+        }
         if (action == 1 || action == 2) { // GLFW_PRESS / REPEAT
             if (key == 265) photoFilter.strength = std::min(1.0f, photoFilter.strength + 0.1f);   // Up
             if (key == 264) photoFilter.strength = std::max(0.0f, photoFilter.strength - 0.1f);   // Down
         }
         if (action == 1) { // GLFW_PRESS
             if (key == 70) photoFilter.kind = (FilterKind)((photoFilter.kind + 1) % FILTER_COUNT); // F
-            if (key == 49) currentMode = 0;                          // '1'
-            else if (key == 50) currentMode = 1;                     // '2'
-            else if (key == 51) currentMode = 2;                     // '3'
-            else if (key == 52) currentMode = 3;                     // '4'
-            else if (key == 53) currentMode = 4;                     // '5'
-            else if (key == 32) currentMode = (currentMode + 1) % 5; // Space
         }
     };
 
-    cb.onUpdate = [&elapsedAnim](double dt) {
+    cb.onMouseButton = [&currentMode, &calendarApp](int button, int action, double mx, double my) {
+        if (currentMode == 5) {
+            calendarApp.onMouseButton(button, action, mx, my);
+        }
+    };
+
+    cb.onCursorPos = [&currentMode, &calendarApp](double mx, double my) {
+        if (currentMode == 5) {
+            calendarApp.onCursorPos(mx, my);
+        }
+    };
+
+    cb.onScroll = [&currentMode, &calendarApp](double xoff, double yoff) {
+        if (currentMode == 5) {
+            calendarApp.onScroll(xoff, yoff);
+        }
+    };
+
+    cb.onChar = [&currentMode, &calendarApp](unsigned int codepoint) {
+        if (currentMode == 5) {
+            calendarApp.onChar(codepoint);
+        }
+    };
+
+    cb.onDrop = [&currentMode, &calendarApp](const std::string& filePath) {
+        if (currentMode == 5) {
+            calendarApp.onDropFile(filePath);
+        }
+    };
+
+    cb.onUpdate = [&elapsedAnim, &currentMode, &calendarApp](double dt) {
         elapsedAnim += dt;
+        if (currentMode == 5) {
+            calendarApp.update(dt);
+        }
     };
 
     cb.onRender = [&]() {
@@ -1238,11 +1290,15 @@ int main(int argc, char* argv[]) {
                 std::cout << "Photo filter: " << filterName(photoFilter.kind) << "  strength " << photoFilter.strength << "\n";
                 lastKind = (int)photoFilter.kind; lastStrength = photoFilter.strength;
             }
+        } else if (currentMode == 5) {
+            // Option 5: Interactive Multi-Day Calendar, Live Animations & Saving
+            calendarApp.render();
         }
     };
 
     gl::runLoop(window, cb);
 
+    calendarApp.shutdown();
     gl::deleteTexture(photoTex);
     gl::deleteTexture(fontTex);
     gl::shutdownTextureRenderer();
