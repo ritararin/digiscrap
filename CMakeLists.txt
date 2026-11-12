@@ -53,6 +53,8 @@ add_library(scrapbook_modules
     src/textures/image_loader.cpp
     src/textures/font_atlas.cpp
     src/textures/filter_mirror.cpp
+    src/calendar/calendar.cpp
+    src/calendar/day_storage.cpp
 )
 target_include_directories(scrapbook_modules PUBLIC src)
 target_compile_definitions(scrapbook_modules PUBLIC _USE_MATH_DEFINES)
@@ -63,13 +65,17 @@ add_library(opengl_renderer STATIC
     src/opengl/shader.cpp
     src/opengl/renderer.cpp
     src/opengl/texture_renderer.cpp
+    src/calendar/calendar_gl.cpp
 )
 target_include_directories(opengl_renderer PUBLIC src extern/glad/include)
 target_link_libraries(opengl_renderer PUBLIC glad glfw OpenGL::GL scrapbook_modules)
 
-# ---- Main Executable ----
+# ---- Main Executables ----
 add_executable(scrapbook src/main.cpp)
 target_link_libraries(scrapbook PRIVATE opengl_renderer scrapbook_modules)
+
+add_executable(scrapbook_gl src/main.cpp)
+target_link_libraries(scrapbook_gl PRIVATE opengl_renderer scrapbook_modules)
 
 # ---- Test Executables ----
 add_executable(polygons_test src/polygons/test_polygons.cpp)
@@ -96,6 +102,9 @@ target_link_libraries(textures_test PRIVATE scrapbook_modules)
 add_executable(opengl_test src/opengl/test_opengl.cpp)
 target_link_libraries(opengl_test PRIVATE opengl_renderer scrapbook_modules)
 
+add_executable(calendar_test src/calendar/test_calendar.cpp)
+target_link_libraries(calendar_test PRIVATE opengl_renderer scrapbook_modules)
+
 # ---- Testing & Targets ----
 enable_testing()
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/output")
@@ -108,13 +117,14 @@ add_test(NAME stickers COMMAND sticker_test)
 add_test(NAME easing_paths COMMAND easing_paths_test)
 add_test(NAME textures COMMAND textures_test)
 add_test(NAME opengl COMMAND opengl_test)
+add_test(NAME calendar COMMAND calendar_test)
 
-set_tests_properties(polygons clipping_colour lines_circles animation stickers easing_paths textures opengl PROPERTIES
+set_tests_properties(polygons clipping_colour lines_circles animation stickers easing_paths textures opengl calendar PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_custom_target(check
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C $<CONFIG>
-    DEPENDS polygons_test clipping_colour_test lines_circles_test animation_test sticker_test easing_paths_test textures_test opengl_test
+    DEPENDS polygons_test clipping_colour_test lines_circles_test animation_test sticker_test easing_paths_test textures_test opengl_test calendar_test
     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 add_custom_target(run

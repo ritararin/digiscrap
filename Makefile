@@ -6,11 +6,16 @@ MODULE_SRC = src/lines/lines.cpp src/polygons/polygons.cpp \
              src/clipping/clipping.cpp src/circles/circles.cpp \
              src/curves/curves.cpp src/colour/colour.cpp \
              src/easing/easing.cpp src/paths/paths.cpp \
-             src/transitions/transitions.cpp
+             src/transitions/transitions.cpp \
+             src/textures/image_loader.cpp src/textures/font_atlas.cpp \
+             src/textures/filter_mirror.cpp \
+             src/calendar/calendar.cpp src/calendar/day_storage.cpp
 
 ANIM_SRC = src/animation/exporter.cpp src/animation/demo_sequences.cpp
 STICKER_SRC = src/stickers/demo_drag.cpp
-GL_SRC = extern/glad/src/glad.c src/opengl/window.cpp src/opengl/shader.cpp src/opengl/renderer.cpp
+GL_SRC = extern/glad/src/glad.c src/opengl/window.cpp src/opengl/shader.cpp \
+         src/opengl/renderer.cpp src/opengl/texture_renderer.cpp \
+         src/calendar/calendar_gl.cpp
 
 HEADERS = $(wildcard src/*/*.h) $(wildcard src/opengl/*.h)
 
@@ -25,6 +30,7 @@ ifeq ($(OS),Windows_NT)
   RUN_STICKER = sticker_test.exe
   RUN_EASING = easing_paths_test.exe
   RUN_OPENGL = opengl_test.exe
+  RUN_CALENDAR = calendar_test.exe
 else
   UNAME_S := $(shell uname -s)
   ifeq ($(UNAME_S),Darwin)
@@ -41,11 +47,12 @@ else
   RUN_STICKER = ./sticker_test
   RUN_EASING = ./easing_paths_test
   RUN_OPENGL = ./opengl_test
+  RUN_CALENDAR = ./calendar_test
 endif
 
 .PHONY: all run test clean
 
-all: scrapbook polygons_test clipping_colour_test lines_circles_test animation_test sticker_test easing_paths_test opengl_test
+all: scrapbook polygons_test clipping_colour_test lines_circles_test animation_test sticker_test easing_paths_test opengl_test calendar_test
 
 scrapbook: src/main.cpp $(MODULE_SRC) $(ANIM_SRC) $(STICKER_SRC) $(GL_SRC) $(HEADERS)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) src/main.cpp $(MODULE_SRC) $(ANIM_SRC) $(STICKER_SRC) $(GL_SRC) $(GL_LIBS) -o $@
@@ -71,11 +78,14 @@ easing_paths_test: src/easing/test_easing_paths.cpp $(MODULE_SRC) $(HEADERS)
 opengl_test: src/opengl/test_opengl.cpp $(GL_SRC) $(MODULE_SRC) $(HEADERS)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) src/opengl/test_opengl.cpp $(GL_SRC) $(MODULE_SRC) $(GL_LIBS) -o $@
 
+calendar_test: src/calendar/test_calendar.cpp src/animation/exporter.cpp $(GL_SRC) $(MODULE_SRC) $(HEADERS)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) src/calendar/test_calendar.cpp src/animation/exporter.cpp $(GL_SRC) $(MODULE_SRC) $(GL_LIBS) -o $@
+
 run: scrapbook
 	$(MKDIR_OUTPUT)
 	$(RUN_SCRAPBOOK)
 
-test: polygons_test clipping_colour_test lines_circles_test animation_test sticker_test easing_paths_test opengl_test
+test: polygons_test clipping_colour_test lines_circles_test animation_test sticker_test easing_paths_test opengl_test calendar_test
 	$(MKDIR_OUTPUT)
 	$(RUN_POLYGONS)
 	$(RUN_CLIPPING)
@@ -84,6 +94,7 @@ test: polygons_test clipping_colour_test lines_circles_test animation_test stick
 	$(RUN_STICKER)
 	$(RUN_EASING)
 	$(RUN_OPENGL)
+	$(RUN_CALENDAR)
 
 clean:
 ifeq ($(OS),Windows_NT)
