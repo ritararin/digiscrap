@@ -1,10 +1,11 @@
 #pragma once
 // ---------------------------------------------------------------------------
 // calendar_gl.h — Interactive OpenGL Calendar Month View, Multi-Day Page
-// Editor, Live CP2 Animations (drop-and-settle, page-turn, highlight move),
-// Thumbnails of Saved Pages, Month Navigation, and Autosave (Option 5).
+// Editor, Per-Day Illustrated Photographs, Live CP2 Animations (drop-and-settle,
+// page-turn, highlight move), Thumbnails of Saved Pages, and Autosave.
 // ---------------------------------------------------------------------------
 
+#include <array>
 #include <map>
 #include <string>
 #include <vector>
@@ -66,13 +67,14 @@ public:
     void openDayPage(int day, bool withPageTurn = true);
     void returnToCalendar(bool withPageTurn = true);
     void navigateMonth(int deltaMonths);
+    void cycleDayPhotoTheme();
     void triggerDropAnimation(int singleElementIndex = -1);
     bool saveCurrentDay();
 
-    ViewMode           viewMode() const { return view_; }
-    int                highlightedDay() const { return highlightedDay_; }
+    ViewMode              viewMode() const { return view_; }
+    int                   highlightedDay() const { return highlightedDay_; }
     const CalendarLayout& calendarLayout() const { return calLayout_; }
-    const DayLayout&   currentDayLayout() const { return currentDay_; }
+    const DayLayout&      currentDayLayout() const { return currentDay_; }
 
 private:
     struct HighlightMoveState {
@@ -102,12 +104,16 @@ private:
 
     gl::Texture photoTex_{};
     gl::Texture fontTex_{};
+    std::array<gl::Texture, kNumPhotoThemes> themePhotos_{};
     std::string saveDir_          = "saves";
     std::string defaultPhotoPath_ = "demo";
 
     ViewMode       view_           = VIEW_CALENDAR;
     CalendarLayout calLayout_{};
     int            highlightedDay_ = 5;
+    int            hoveredDay_     = 0;
+    double         mouseX_         = 0.0;
+    double         mouseY_         = 0.0;
     double         pulseClock_     = 0.0;
 
     DayLayout      currentDay_{};
@@ -122,11 +128,13 @@ private:
     // Cached GPU textures for thumbnails of saved days in `calLayout_.month` (key = day 1..31).
     std::map<int, gl::Texture> monthThumbs_;
 
+    const gl::Texture& textureForDay(const DayLayout& layout) const;
     void refreshMonthThumbnails();
     void updateDayThumbnail(int day, const DayLayout& layout);
     void clearMonthThumbnails();
     DayLayout loadOrCreateDay(int year, int month, int day) const;
 
+    void renderNotebookShell();
     void renderCalendarView();
     void renderDayPageView(const DayLayout& layout, bool applyDropAnim);
     void renderPageTurnOverlay();

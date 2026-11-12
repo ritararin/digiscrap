@@ -95,7 +95,15 @@ static void testOption5StorageAndAnimations() {
     CHECK(!loadDayLayout("output/no_such_day_file.txt", untouched), "missing layout file rejected");
     CHECK(!deserializeDayLayout("BAD_HEADER\n", untouched), "malformed header rejected");
 
-    // 4. Thumbnail rendering reflects saved layout content
+    // 4. Thumbnail rendering reflects saved layout content & per-day photos
+    Framebuffer photo0 = makeDayPhoto(0, 60, 45);
+    Framebuffer photo1 = makeDayPhoto(1, 60, 45);
+    bool photosDistinct = false;
+    for (size_t i = 0; i < photo0.pixels.size(); ++i) {
+        if (!same(photo0.pixels[i], photo1.pixels[i])) { photosDistinct = true; break; }
+    }
+    CHECK(photosDistinct, "daily photo themes generate distinct scene images");
+
     Framebuffer thumbA = renderDayThumbnail(orig, 84, 44);
     CHECK(thumbA.width == 84 && thumbA.height == 44, "renderDayThumbnail dimensions 84x44");
     DayLayout modified = orig;

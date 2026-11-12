@@ -3,9 +3,13 @@
 #endif
 #include "calendar/day_storage.h"
 #include "polygons/polygons.h"
+#include "circles/circles.h"
 #include "curves/curves.h"
 #include "lines/lines.h"
 #include "colour/colour.h"
+#include "animation/lerp.h"
+#include "textures/image_loader.h"
+#include "textures/filter_mirror.h"
 
 #include <algorithm>
 #include <cmath>
@@ -14,6 +18,10 @@
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 std::string shapeKindToString(ShapeKind kind) {
     switch (kind) {
@@ -54,33 +62,33 @@ ShapeKind shapeKindFromString(const std::string& token, bool* ok) {
 Polygon buildShapePolygon(ShapeKind kind) {
     switch (kind) {
         case ShapeKind::STAR:
-            return makeStar({0, 0}, 50, 22);
+            return makeStar({0, 0}, 46, 20);
         case ShapeKind::HEART:
-            return makeHeart({0, 0}, 85);
+            return makeHeart({0, 0}, 78);
         case ShapeKind::BEZIER_HEART:
-            return makeBezierHeart({0, 0}, 85, 24);
+            return makeBezierHeart({0, 0}, 78, 24);
         case ShapeKind::SQUARE:
-            return makeSquare({0, 0}, 64);
+            return makeSquare({0, 0}, 58);
         case ShapeKind::HEXAGON:
-            return makeRegularPolygon({0, 0}, 40, 6);
+            return makeRegularPolygon({0, 0}, 36, 6);
         case ShapeKind::CIRCLE:
-            return makeRegularPolygon({0, 0}, 36, 32);
+            return makeRegularPolygon({0, 0}, 34, 32);
         case ShapeKind::ELLIPSE: {
             Polygon p = makeRegularPolygon({0, 0}, 1.0, 32);
-            return transformPolygon(p, Mat3::scale(42.0, 26.0));
+            return transformPolygon(p, Mat3::scale(40.0, 25.0));
         }
         case ShapeKind::CLOUD:
-            return makeCloud({0, 0}, 120, 68, 12);
+            return makeCloud({0, 0}, 110, 62, 12);
         case ShapeKind::CURVY_STAR:
-            return makeCurvyStar({0, 0}, 38, 20, 5, 10);
+            return makeCurvyStar({0, 0}, 36, 19, 5, 10);
         case ShapeKind::RIBBON:
-            return makeRibbon({0, 0}, 120, 34, 10);
+            return makeRibbon({0, 0}, 116, 32, 10);
         case ShapeKind::TAPE:
-            return {{-46, -13}, {46, -13}, {46, 13}, {-46, 13}};
+            return {{-46, -12}, {46, -12}, {46, 12}, {-46, 12}};
         case ShapeKind::DATE_STAMP:
-            return makeDateStamp({0, 0}, 220, 54, 10);
+            return makeDateStamp({0, 0}, 216, 52, 10);
     }
-    return makeStar({0, 0}, 50, 22);
+    return makeStar({0, 0}, 46, 20);
 }
 
 void DayLayout::sortByZ() {
@@ -94,6 +102,253 @@ std::string formatDateStamp(int year, int month, int day) {
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%02d-%02d-%04d", day, month, year);
     return std::string(buf);
+}
+
+// ---------------------------------------------------------------------------
+// Daily Photo Generator (8 distinct illustrated scenes using CP1/CP2)
+// ---------------------------------------------------------------------------
+
+int photoThemeForDay(int year, int month, int day) {
+    int idx = (day - 1 + month * 3 + year) % kNumPhotoThemes;
+    return (idx < 0) ? (idx + kNumPhotoThemes) : idx;
+}
+
+int parsePhotoTheme(const std::string& photoPath, int fallbackDay) {
+    if (photoPath.rfind("theme:", 0) == 0 && photoPath.size() > 6) {
+        int v = std::atoi(photoPath.c_str() + 6);
+        return ((v % kNumPhotoThemes) + kNumPhotoThemes) % kNumPhotoThemes;
+    }
+    return ((fallbackDay - 1) % kNumPhotoThemes + kNumPhotoThemes) % kNumPhotoThemes;
+}
+
+std::string makePhotoThemeSpec(int themeIndex) {
+    int idx = ((themeIndex % kNumPhotoThemes) + kNumPhotoThemes) % kNumPhotoThemes;
+    return "theme:" + std::to_string(idx);
+}
+
+std::string photoThemeCaption(int themeIndex) {
+    static const char* kCaptions[kNumPhotoThemes] = {
+        "SUNSET HIKE",
+        "STARRY CAMP",
+        "OCEAN BREEZE",
+        "AUTUMN WALK",
+        "CAFE MORNING",
+        "FLOWER FIELD",
+        "CITY LIGHTS",
+        "RAINBOW DAY"
+    };
+    int idx = ((themeIndex % kNumPhotoThemes) + kNumPhotoThemes) % kNumPhotoThemes;
+    return kCaptions[idx];
+}
+
+static void fillGradH(Framebuffer& fb, int y0, int y1, Color topCol, Color botCol) {
+    y0 = std::max(0, y0);
+    y1 = std::min(fb.height, y1);
+    int span = std::max(1, y1 - y0 - 1);
+    for (int y = y0; y < y1; ++y) {
+        Color c = lerp(topCol, botCol, (double)(y - y0) / (double)span);
+        for (int x = 0; x < fb.width; ++x) {
+            fb.pixels[y * fb.width + x] = c;
+        }
+    }
+}
+
+Framebuffer makeDayPhoto(int themeIndex, int w, int h) {
+    w = std::max(16, w);
+    h = std::max(16, h);
+    Framebuffer fb(w, h, {240, 230, 210, 255});
+    int theme = ((themeIndex % kNumPhotoThemes) + kNumPhotoThemes) % kNumPhotoThemes;
+
+    const double sx = w / 360.0;
+    const double sy = h / 270.0;
+    auto S = [&](double x, double y) -> Vec2 { return {x * sx, y * sy}; };
+    auto R = [&](double r) -> int { return std::max(1, (int)std::lround(r * std::min(sx, sy))); };
+
+    if (theme == 0) {
+        // 0: SUNSET HIKE — Warm coral/amber gradient sky, glowing sun, layered mountain ridges, pine silhouettes
+        fillGradH(fb, 0, (int)(h * 0.55), {118, 72, 128, 255}, {238, 132, 84, 255});
+        fillGradH(fb, (int)(h * 0.55), h, {238, 132, 84, 255}, {252, 214, 118, 255});
+
+        fillCircle(fb, (int)(255 * sx), (int)(105 * sy), R(44), {254, 198, 112, 255});
+        fillCircle(fb, (int)(255 * sx), (int)(105 * sy), R(30), {255, 238, 165, 255});
+
+        fillPolygon(fb, transformPolygon(makeCloud({95, 62}, 86, 38), Mat3::scale(sx, sy)), {248, 185, 155, 255});
+
+        // Distant purple mountains
+        fillPolygon(fb, {S(0, 185), S(65, 125), S(145, 162), S(225, 112), S(305, 155), S(360, 128), S(360, 270), S(0, 270)},
+                    {112, 82, 116, 255});
+        // Mid pine ridge
+        fillPolygon(fb, {S(0, 210), S(85, 162), S(180, 192), S(275, 150), S(360, 185), S(360, 270), S(0, 270)},
+                    {76, 104, 92, 255});
+        // Foreground dark forest hill
+        fillPolygon(fb, {S(0, 228), S(120, 196), S(245, 218), S(360, 194), S(360, 270), S(0, 270)},
+                    {48, 76, 64, 255});
+    } else if (theme == 1) {
+        // 1: STARRY CAMP — Deep night sky, crescent moon, stars, lake reflection, glowing orange tent
+        fillGradH(fb, 0, (int)(h * 0.66), {22, 30, 62, 255}, {52, 84, 118, 255});
+        fillGradH(fb, (int)(h * 0.66), h, {34, 58, 86, 255}, {18, 32, 54, 255});
+
+        // Moon
+        fillCircle(fb, (int)(285 * sx), (int)(58 * sy), R(22), {252, 238, 175, 255});
+        fillCircle(fb, (int)(293 * sx), (int)(52 * sy), R(18), {28, 40, 74, 255});
+
+        // Twinkling stars
+        const int starPts[8][2] = {{45,35},{95,60},{150,28},{210,52},{65,95},{175,82},{325,92},{130,55}};
+        for (auto& sp : starPts) {
+            fillPolygon(fb, transformPolygon(makeStar({(double)sp[0], (double)sp[1]}, 7, 3), Mat3::scale(sx, sy)),
+                        {252, 235, 165, 255});
+        }
+
+        // Far shore mountains
+        fillPolygon(fb, {S(0, 178), S(70, 122), S(155, 160), S(245, 115), S(360, 178)}, {30, 44, 68, 255});
+
+        // Water shimmer lines
+        for (int i = 0; i < 6; ++i) {
+            int wy = (int)((190 + i * 11) * sy);
+            drawLineBresenham(fb, (int)((260 - i * 6) * sx), wy, (int)((305 + i * 6) * sx), wy, {245, 220, 145, 255});
+        }
+
+        // Foreground shore & glowing A-frame tent
+        fillPolygon(fb, {S(0, 212), S(230, 220), S(360, 248), S(360, 270), S(0, 270)}, {26, 42, 38, 255});
+        fillPolygon(fb, {S(55, 235), S(95, 176), S(135, 235)}, {236, 138, 62, 255});
+        fillPolygon(fb, {S(80, 235), S(95, 192), S(110, 235)}, {252, 218, 122, 255});
+    } else if (theme == 2) {
+        // 2: OCEAN BREEZE — Sunny coastal sky, turquoise sea, sandy beach, sailboat on horizon
+        fillGradH(fb, 0, (int)(h * 0.52), {108, 182, 238, 255}, {202, 234, 250, 255});
+        fillGradH(fb, (int)(h * 0.52), (int)(h * 0.80), {42, 132, 176, 255}, {92, 186, 196, 255});
+        fillGradH(fb, (int)(h * 0.80), h, {242, 214, 162, 255}, {226, 190, 132, 255});
+
+        fillCircle(fb, (int)(70 * sx), (int)(54 * sy), R(24), {255, 232, 132, 255});
+        fillPolygon(fb, transformPolygon(makeCloud({255, 58}, 92, 42), Mat3::scale(sx, sy)), {255, 252, 245, 255});
+
+        // Sailboat
+        fillPolygon(fb, {S(175, 152), S(235, 152), S(222, 168), S(188, 168)}, {186, 76, 58, 255});
+        fillPolygon(fb, {S(204, 92), S(204, 149), S(178, 149)}, {255, 252, 245, 255});
+        fillPolygon(fb, {S(208, 98), S(232, 149), S(208, 149)}, {248, 238, 220, 255});
+
+        // Gentle white foam line along the beach
+        fillPolygon(fb, {S(0, 212), S(120, 204), S(250, 216), S(360, 208), S(360, 220), S(0, 222)},
+                    {242, 250, 252, 255});
+    } else if (theme == 3) {
+        // 3: AUTUMN WALK — Golden hills, winding trail, terracotta/mustard/sage autumn trees
+        fillGradH(fb, 0, (int)(h * 0.56), {178, 212, 228, 255}, {250, 226, 182, 255});
+        fillGradH(fb, (int)(h * 0.56), h, {218, 166, 92, 255}, {176, 118, 68, 255});
+
+        // Winding path
+        fillPolygon(fb, {S(168, 152), S(192, 152), S(245, 270), S(115, 270)}, {238, 214, 176, 255});
+
+        // Autumn trees (trunks + colourful canopies)
+        struct Tree { double x, y, r; Color c; };
+        const Tree trees[] = {
+            {75, 138, 36, {196, 92, 70, 255}},
+            {130, 128, 28, {228, 165, 69, 255}},
+            {235, 132, 32, {214, 118, 62, 255}},
+            {292, 142, 38, {173, 170, 134, 255}},
+        };
+        for (const auto& tr : trees) {
+            fillPolygon(fb, {S(tr.x - 5, tr.y), S(tr.x + 5, tr.y), S(tr.x + 7, tr.y + 52), S(tr.x - 7, tr.y + 52)},
+                        {108, 72, 48, 255});
+            fillCircle(fb, (int)(tr.x * sx), (int)(tr.y * sy), R(tr.r), tr.c);
+            fillCircle(fb, (int)((tr.x - 12) * sx), (int)((tr.y + 8) * sy), R(tr.r * 0.72), tr.c);
+        }
+    } else if (theme == 4) {
+        // 4: CAFE MORNING — Warm wooden table, ceramic coffee cup with steam curls, saucer & pastry
+        fillGradH(fb, 0, (int)(h * 0.58), {232, 212, 184, 255}, {208, 182, 148, 255});
+        fillGradH(fb, (int)(h * 0.58), h, {154, 106, 67, 255}, {122, 80, 48, 255});
+
+        // Saucer & coffee mug
+        fillEllipse(fb, (int)(165 * sx), (int)(208 * sy), R(68), R(20), {248, 240, 226, 255});
+        fillPolygon(fb, {S(118, 128), S(212, 128), S(198, 202), S(132, 202)}, {196, 92, 70, 255});
+        fillEllipse(fb, (int)(165 * sx), (int)(128 * sy), R(47), R(14), {252, 244, 232, 255});
+        fillEllipse(fb, (int)(165 * sx), (int)(129 * sy), R(40), R(10), {92, 56, 36, 255});
+        // Mug handle
+        drawCircleMidpoint(fb, (int)(214 * sx), (int)(162 * sy), R(18), {196, 92, 70, 255});
+
+        // Rising steam lines
+        for (int k = -1; k <= 1; ++k) {
+            double bx = 165 + k * 18;
+            Polygon steam = bezierCubic(S(bx, 108), S(bx - 12, 82), S(bx + 14, 56), S(bx - 4, 32), 20);
+            for (size_t i = 0; i + 1 < steam.size(); ++i) {
+                drawLineBresenham(fb, (int)steam[i].x, (int)steam[i].y,
+                                  (int)steam[i + 1].x, (int)steam[i + 1].y, {252, 246, 236, 255});
+            }
+        }
+        // Croissant on side plate
+        fillEllipse(fb, (int)(282 * sx), (int)(216 * sy), R(42), R(14), {248, 240, 226, 255});
+        fillEllipse(fb, (int)(282 * sx), (int)(208 * sy), R(26), R(12), {228, 165, 69, 255});
+    } else if (theme == 5) {
+        // 5: FLOWER FIELD — Blue sky, clouds, green meadow, golden sunflowers in foreground
+        fillGradH(fb, 0, (int)(h * 0.54), {122, 192, 242, 255}, {214, 238, 250, 255});
+        fillPolygon(fb, transformPolygon(makeCloud({110, 56}, 88, 40), Mat3::scale(sx, sy)), {255, 252, 245, 255});
+        fillPolygon(fb, transformPolygon(makeCloud({265, 70}, 76, 34), Mat3::scale(sx, sy)), {255, 252, 245, 255});
+
+        fillPolygon(fb, {S(0, 155), S(110, 132), S(240, 150), S(360, 128), S(360, 270), S(0, 270)},
+                    {110, 162, 104, 255});
+        fillPolygon(fb, {S(0, 192), S(160, 172), S(360, 188), S(360, 270), S(0, 270)},
+                    {84, 134, 86, 255});
+
+        // Sunflowers
+        const double fx[4] = {72, 148, 224, 296};
+        const double fy[4] = {188, 174, 192, 178};
+        for (int i = 0; i < 4; ++i) {
+            fillPolygon(fb, {S(fx[i] - 3, fy[i]), S(fx[i] + 3, fy[i]), S(fx[i] + 3, 270), S(fx[i] - 3, 270)},
+                        {62, 106, 64, 255});
+            Polygon petals = makeCurvyStar({fx[i], fy[i]}, 28, 15, 8, 6);
+            fillPolygon(fb, transformPolygon(petals, Mat3::scale(sx, sy)), {244, 186, 52, 255});
+            fillCircle(fb, (int)(fx[i] * sx), (int)(fy[i] * sy), R(11), {96, 62, 38, 255});
+        }
+    } else if (theme == 6) {
+        // 6: CITY LIGHTS — Violet-to-peach dusk sky, city skyline silhouette with lit windows, water reflection
+        fillGradH(fb, 0, (int)(h * 0.42), {56, 46, 96, 255}, {168, 88, 114, 255});
+        fillGradH(fb, (int)(h * 0.42), (int)(h * 0.76), {168, 88, 114, 255}, {244, 174, 108, 255});
+        fillGradH(fb, (int)(h * 0.76), h, {44, 38, 68, 255}, {26, 22, 44, 255});
+
+        const int bldgs[7][3] = {
+            {18, 44, 110}, {66, 52, 78}, {122, 46, 98}, {172, 58, 64},
+            {234, 42, 104}, {280, 48, 86}, {330, 30, 118}
+        };
+        for (auto& b : bldgs) {
+            double bx = b[0], bw = b[1], topY = b[2];
+            fillPolygon(fb, {S(bx, topY), S(bx + bw, topY), S(bx + bw, 206), S(bx, 206)}, {38, 34, 58, 255});
+            for (double wy = topY + 10; wy < 196; wy += 16) {
+                for (double wx = bx + 8; wx + 8 < bx + bw; wx += 14) {
+                    fillPolygon(fb, {S(wx, wy), S(wx + 6, wy), S(wx + 6, wy + 8), S(wx, wy + 8)},
+                                {252, 218, 122, 255});
+                }
+            }
+        }
+    } else {
+        // 7: RAINBOW DAY — Sky clearing after rain, multi-band rainbow arch, green valley & clouds
+        fillGradH(fb, 0, (int)(h * 0.65), {136, 188, 232, 255}, {218, 238, 248, 255});
+        const Color bands[5] = {
+            {226, 98, 86, 255}, {242, 168, 72, 255}, {252, 222, 106, 255},
+            {112, 182, 126, 255}, {98, 162, 224, 255}
+        };
+        for (int b = 0; b < 5; ++b) {
+            fillCircle(fb, (int)(180 * sx), (int)(195 * sy), R(128 - b * 9), bands[b]);
+        }
+        fillCircle(fb, (int)(180 * sx), (int)(195 * sy), R(82), {196, 226, 242, 255});
+
+        fillPolygon(fb, {S(0, 195), S(115, 162), S(245, 182), S(360, 156), S(360, 270), S(0, 270)},
+                    {96, 148, 98, 255});
+        fillPolygon(fb, transformPolygon(makeCloud({75, 178}, 86, 40), Mat3::scale(sx, sy)), {255, 252, 245, 255});
+        fillPolygon(fb, transformPolygon(makeCloud({285, 168}, 86, 40), Mat3::scale(sx, sy)), {255, 252, 245, 255});
+    }
+
+    return fb;
+}
+
+Framebuffer resolveDayPhoto(const DayLayout& layout, int w, int h) {
+    if (!layout.photoPath.empty() && layout.photoPath != "demo" &&
+        layout.photoPath.rfind("theme:", 0) != 0) {
+        Framebuffer loaded(1, 1);
+        if (loadImage(layout.photoPath, loaded)) {
+            if (loaded.width == w && loaded.height == h) return loaded;
+            return resizeBilinear(loaded, w, h);
+        }
+    }
+    int theme = parsePhotoTheme(layout.photoPath, layout.day);
+    return makeDayPhoto(theme, w, h);
 }
 
 static SavedElement makeElem(ShapeKind kind, Vec2 pos, double rotDeg, Vec2 scale,
@@ -110,17 +365,24 @@ static SavedElement makeElem(ShapeKind kind, Vec2 pos, double rotDeg, Vec2 scale
     return e;
 }
 
-DayLayout makeDefaultDayLayout(int year, int month, int day, const std::string& photoPath) {
+DayLayout makeDefaultDayLayout(int year, int month, int day, const std::string& customPhotoPath) {
     DayLayout L;
-    L.year           = year;
-    L.month          = month;
-    L.day            = day;
-    L.photoPath      = photoPath.empty() ? "demo" : photoPath;
-    L.photoFilter    = 2;     // Sepia
-    L.filterStrength = 1.0f;
+    L.year  = year;
+    L.month = month;
+    L.day   = day;
+
+    int theme = photoThemeForDay(year, month, day);
+    if (customPhotoPath.empty() || customPhotoPath == "demo") {
+        L.photoPath = makePhotoThemeSpec(theme);
+    } else {
+        L.photoPath = customPhotoPath;
+    }
+
+    // Subtle warm sepia on Day 5 (matching the CP3 prototype spec) and clean/vivid on other days
+    L.photoFilter    = (day == 5) ? 2 : 0;
+    L.filterStrength = (day == 5) ? 0.45f : 1.0f;
     L.dateText       = formatDateStamp(year, month, day);
 
-    // Palette matching main.cpp
     const Color mustard   {228, 165,  69, 255};
     const Color honey     {249, 205, 125, 255};
     const Color green     {110, 145, 121, 255};
@@ -133,33 +395,33 @@ DayLayout makeDefaultDayLayout(int year, int month, int day, const std::string& 
     const Color tapeA     {228, 165,  69, 195};
     const Color tapeB     {110, 145, 121, 195};
 
-    // Subtle per-day variation so different days feel unique
     double rotShift = ((day % 5) - 2) * 4.0;
+    double yShift   = ((day % 3) - 1) * 8.0;
 
-    // 1. Translucent washi tape strips holding the photo corners
-    L.elements.push_back(makeElem(ShapeKind::TAPE, {145, 92}, -32.0, {1.0, 1.0},
+    // 1. Translucent washi tape strips holding the Polaroid corners
+    L.elements.push_back(makeElem(ShapeKind::TAPE, {136, 92}, -30.0, {1.0, 1.0},
                                   tapeA, {180, 130, 50, 180}, 1));
-    L.elements.push_back(makeElem(ShapeKind::TAPE, {455, 92},  32.0, {1.0, 1.0},
+    L.elements.push_back(makeElem(ShapeKind::TAPE, {438, 92},  30.0, {1.0, 1.0},
                                   tapeB, { 84, 118, 96, 180}, 2));
 
-    // 2. Stickers (star, bezier heart, hexagon, square, circle, cloud, curvy star)
-    L.elements.push_back(makeElem(ShapeKind::STAR, {505, 125}, 15.0 + rotShift, {1.15, 1.15},
+    // 2. Stickers arranged on the right journal card and Polaroid corner
+    L.elements.push_back(makeElem(ShapeKind::STAR, {525, 132 + yShift}, 14.0 + rotShift, {1.05, 1.05},
                                   mustard, {150, 100, 30, 255}, 3));
-    L.elements.push_back(makeElem(ShapeKind::BEZIER_HEART, {205, 360}, -18.0 + rotShift, {1.0, 1.0},
+    L.elements.push_back(makeElem(ShapeKind::BEZIER_HEART, {180, 378}, -16.0 + rotShift, {0.95, 0.95},
                                   terracotta, {120, 50, 35, 255}, 4));
-    L.elements.push_back(makeElem(ShapeKind::HEXAGON, {625, 135}, 10.0, {1.0, 1.0},
+    L.elements.push_back(makeElem(ShapeKind::HEXAGON, {665, 136 - yShift}, 10.0, {1.0, 1.0},
                                   sage, dark, 5));
-    L.elements.push_back(makeElem(ShapeKind::SQUARE, {565, 280}, 18.0 - rotShift, {1.0, 1.0},
+    L.elements.push_back(makeElem(ShapeKind::SQUARE, {555, 258}, 16.0 - rotShift, {0.95, 0.95},
                                   tint(honey, green, 0.55), {170, 120, 40, 255}, 6));
-    L.elements.push_back(makeElem(ShapeKind::CIRCLE, {695, 235}, 0.0, {1.0, 1.0},
+    L.elements.push_back(makeElem(ShapeKind::CIRCLE, {690, 252}, 0.0, {1.0, 1.0},
                                   green, deepGreen, 7));
-    L.elements.push_back(makeElem(ShapeKind::CLOUD, {640, 345}, 0.0, {0.95, 0.95},
+    L.elements.push_back(makeElem(ShapeKind::CLOUD, {625, 360}, 0.0, {0.92, 0.92},
                                   white, brown, 8));
-    L.elements.push_back(makeElem(ShapeKind::CURVY_STAR, {390, 475}, 12.0, {1.0, 1.0},
+    L.elements.push_back(makeElem(ShapeKind::CURVY_STAR, {420, 468}, 12.0, {0.95, 0.95},
                                   honey, brown, 9));
 
     // 3. Date stamp sticker at bottom-right
-    L.elements.push_back(makeElem(ShapeKind::DATE_STAMP, {610, 475}, -4.0, {1.0, 1.0},
+    L.elements.push_back(makeElem(ShapeKind::DATE_STAMP, {625, 474}, -3.0, {1.0, 1.0},
                                   white, brown, 10));
 
     L.sortByZ();
@@ -171,7 +433,7 @@ std::string serializeDayLayout(const DayLayout& layout) {
     out << std::fixed << std::setprecision(4);
     out << "DIGISCRAP_DAY_V1\n";
     out << "date " << layout.year << " " << layout.month << " " << layout.day << "\n";
-    out << "photo " << (layout.photoPath.empty() ? "demo" : layout.photoPath) << "\n";
+    out << "photo " << (layout.photoPath.empty() ? "theme:0" : layout.photoPath) << "\n";
     out << "filter " << layout.photoFilter << " " << layout.filterStrength << "\n";
     out << "datetext " << (layout.dateText.empty()
                            ? formatDateStamp(layout.year, layout.month, layout.day)
@@ -201,7 +463,7 @@ bool deserializeDayLayout(const std::string& text, DayLayout& outLayout) {
     parsed.elements.clear();
 
     std::string line;
-    std::getline(in, line); // consume remainder of header line
+    std::getline(in, line);
     while (std::getline(in, line)) {
         if (line.empty()) continue;
         std::istringstream ls(line);
@@ -214,7 +476,7 @@ bool deserializeDayLayout(const std::string& text, DayLayout& outLayout) {
             std::string rest;
             std::getline(ls >> std::ws, rest);
             if (!rest.empty() && rest.back() == '\r') rest.pop_back();
-            parsed.photoPath = rest.empty() ? "demo" : rest;
+            parsed.photoPath = rest.empty() ? "theme:0" : rest;
         } else if (tag == "filter") {
             if (!(ls >> parsed.photoFilter >> parsed.filterStrength)) return false;
         } else if (tag == "datetext") {
@@ -288,25 +550,41 @@ bool hasSavedDayLayout(const std::string& saveDir, int year, int month, int day)
 }
 
 Framebuffer renderDayThumbnail(const DayLayout& layout, int thumbW, int thumbH) {
-    thumbW = std::max(8, thumbW);
-    thumbH = std::max(8, thumbH);
-    Framebuffer fb(thumbW, thumbH, {249, 228, 192, 255}); // warm cream paper
+    thumbW = std::max(12, thumbW);
+    thumbH = std::max(12, thumbH);
+    Framebuffer fb(thumbW, thumbH, {255, 252, 245, 255}); // crisp Polaroid white frame
+
+    // Render the day's actual distinct photograph inside the left/main portion of the thumbnail
+    int px0 = 2, py0 = 2;
+    int pw  = std::max(6, (int)(thumbW * 0.56));
+    int ph  = std::max(6, thumbH - 6);
+    Framebuffer miniPhoto = resolveDayPhoto(layout, pw, ph);
+
+    FilterParams fp;
+    fp.kind     = (FilterKind)std::clamp(layout.photoFilter, 0, (int)FILTER_COUNT - 1);
+    fp.strength = layout.filterStrength;
+    for (int y = 0; y < ph; ++y) {
+        for (int x = 0; x < pw; ++x) {
+            Color c = miniPhoto.pixels[y * pw + x];
+            if (fp.kind != FILTER_NONE && fp.strength > 0.0f) {
+                c = applyFilterMirror(c, fp);
+            }
+            fb.setPixel(px0 + x, py0 + y, c);
+        }
+    }
+
+    // Soft cream right-hand journal area for miniature stickers
+    for (int y = 1; y < thumbH - 1; ++y) {
+        for (int x = px0 + pw + 2; x < thumbW - 1; ++x) {
+            fb.setPixel(x, y, {249, 228, 192, 255});
+        }
+    }
 
     // Scale from 800x600 page coordinates to thumbnail pixel coordinates
     const double sx = (double)thumbW / 800.0;
     const double sy = (double)thumbH / 600.0;
     const Mat3 pageToThumb = Mat3::scale(sx, sy);
 
-    // Miniature polaroid photo card in top-left quadrant
-    Polygon polaroid = transformPolygon({{120, 80}, {480, 80}, {480, 420}, {120, 420}}, pageToThumb);
-    fillPolygon(fb, polaroid, {255, 252, 245, 255});
-    Polygon photoArea = transformPolygon({{140, 100}, {460, 100}, {460, 360}, {140, 360}}, pageToThumb);
-    Color photoCol = (layout.photoFilter == 1) ? Color{155, 155, 155, 255}
-                   : (layout.photoFilter == 2) ? Color{198, 166, 122, 255}
-                                               : Color{135, 175, 145, 255};
-    fillPolygon(fb, photoArea, photoCol);
-
-    // Draw every saved element in z-order using our software scanline fill + alphaBlend
     DayLayout sorted = layout;
     sorted.sortByZ();
     for (const auto& elem : sorted.elements) {
@@ -327,7 +605,7 @@ Framebuffer renderDayThumbnail(const DayLayout& layout, int thumbW, int thumbH) 
         }
     }
 
-    // Thin dark border around the thumbnail
+    // Crisp warm frame border
     Color border{154, 106, 67, 255};
     drawLineBresenham(fb, 0, 0, thumbW - 1, 0, border);
     drawLineBresenham(fb, thumbW - 1, 0, thumbW - 1, thumbH - 1, border);

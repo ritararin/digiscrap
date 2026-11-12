@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <iostream>
 
 #ifndef M_PI
@@ -20,19 +21,20 @@
 
 namespace {
 
+const Color kLeather   {102,  68,  44, 255};
 const Color kBrown     {154, 106,  67, 255};
-const Color kDark      { 77,  74,  63, 255};
-const Color kCream     {249, 228, 192, 255};
-const Color kPaper     {252, 241, 217, 255};
-const Color kWeekend   {247, 222, 178, 255};
+const Color kDark      { 64,  58,  48, 255};
+const Color kCream     {250, 236, 208, 255};
+const Color kPaper     {253, 245, 226, 255};
+const Color kWeekend   {246, 224, 184, 255};
 const Color kWhite     {255, 252, 245, 255};
 const Color kMustard   {228, 165,  69, 255};
 const Color kHoney     {249, 205, 125, 255};
-const Color kGreen     {110, 145, 121, 255};
-const Color kDeepGreen { 84, 118,  96, 255};
+const Color kGreen     { 96, 134, 108, 255};
+const Color kDeepGreen { 68,  98,  78, 255};
 const Color kSage      {173, 170, 134, 255};
 const Color kTerracotta{196,  92,  70, 255};
-const Color kShadow    {214, 186, 140, 255};
+const Color kShadow    {208, 180, 136, 255};
 
 Polygon rectPoly(double x0, double y0, double x1, double y1) {
     return {{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}};
@@ -71,21 +73,51 @@ void drawRectGL(double x0, double y0, double x1, double y1, Color fill, Color ed
     }
 }
 
-void drawButtonGL(const gl::Texture& fontTex, double x0, double y0, double x1, double y1,
-                  const std::string& label, Color bg, Color fg) {
-    Polygon r = rectPoly(x0, y0, x1, y1);
-    gl::drawPolygon(r, Mat3::translate(2, 3), Color{77, 74, 63, 70});
-    gl::drawPolygon(r, Mat3::identity(), bg);
-    gl::drawPolyline(r, Mat3::identity(), kBrown);
-    float scale = 2.0f;
-    float tw = (float)label.size() * 4.0f * scale - scale;
-    float tx = (float)((x0 + x1) * 0.5 - tw * 0.5);
-    float ty = (float)((y0 + y1) * 0.5 - 2.5 * scale);
-    gl::drawStampText(fontTex, label, tx, ty, scale, fg);
-}
-
 bool insideRect(double x, double y, double x0, double y0, double x1, double y1) {
     return x >= x0 && x <= x1 && y >= y0 && y <= y1;
+}
+
+// Compute exact pixel width of a string rendered with the 3x5 bitmap font at integer `scale`.
+int crispTextWidth(const std::string& s, int scale) {
+    if (s.empty() || scale <= 0) return 0;
+    return (int)s.size() * 4 * scale - scale;
+}
+
+// Draw razor-sharp integer-scaled bitmap text snapped to whole screen pixels,
+// with an optional 1px contrast shadow for readability.
+void drawCrispText(const gl::Texture& fontTex, const std::string& text,
+                   double x, double y, int scale, Color col,
+                   bool withShadow = false, Color shadowCol = {255, 252, 245, 180}) {
+    if (text.empty() || scale <= 0) return;
+    float ix = std::round((float)x);
+    float iy = std::round((float)y);
+    float sc = (float)scale;
+    if (withShadow) {
+        gl::drawStampText(fontTex, text, ix + 1.0f, iy + 1.0f, sc, shadowCol);
+    }
+    gl::drawStampText(fontTex, text, ix, iy, sc, col);
+}
+
+void drawCrispTextCentered(const gl::Texture& fontTex, const std::string& text,
+                           double centerX, double centerY, int scale, Color col,
+                           bool withShadow = false, Color shadowCol = {255, 252, 245, 180}) {
+    int w = crispTextWidth(text, scale);
+    int h = 5 * scale;
+    drawCrispText(fontTex, text, centerX - w * 0.5, centerY - h * 0.5,
+                  scale, col, withShadow, shadowCol);
+}
+
+void drawButtonGL(const gl::Texture& fontTex, double x0, double y0, double x1, double y1,
+                  const std::string& label, Color bg, Color fg, bool hovered = false) {
+    Polygon r = rectPoly(x0, y0, x1, y1);
+    gl::drawPolygon(r, Mat3::translate(2, 3), Color{64, 58, 48, 85});
+    Color fillCol = hovered ? lerp(bg, kWhite, 0.28) : bg;
+    gl::drawPolygon(r, Mat3::identity(), fillCol);
+    gl::drawPolyline(r, Mat3::identity(), hovered ? kTerracotta : kBrown);
+    // Subtle top highlight line inside button
+    gl::drawPolygon(rectPoly(x0 + 2, y0 + 2, x1 - 2, y0 + 4), Mat3::identity(),
+                    Color{255, 255, 255, 70});
+    drawCrispTextCentered(fontTex, label, (x0 + x1) * 0.5, (y0 + y1) * 0.5, 2, fg);
 }
 
 double hash01(int n) {
@@ -94,6 +126,18 @@ double hash01(int n) {
     x *= 2246822519u;
     x ^= x >> 13;
     return (x & 0xFFFFFFu) / 16777216.0;
+}
+
+const char* shortFilterLabel(int kind) {
+    switch (kind) {
+        case 1: return "GRAY";
+        case 2: return "SEPIA";
+        case 3: return "TINT";
+        case 4: return "BRIGHT";
+        case 5: return "CONTR";
+        case 6: return "INVERT";
+        default: return "NORMAL";
+    }
 }
 
 } // namespace
@@ -110,7 +154,6 @@ std::vector<Polygon> triangulateConcave(const Polygon& poly) {
         return tris;
     }
 
-    // Remove adjacent duplicate vertices
     std::vector<Vec2> pts;
     pts.reserve(poly.size());
     for (size_t i = 0; i < poly.size(); ++i) {
@@ -121,7 +164,6 @@ std::vector<Polygon> triangulateConcave(const Polygon& poly) {
     }
     if (pts.size() < 3) return tris;
 
-    // Signed area determines winding orientation
     double signedArea2 = 0.0;
     for (size_t i = 0; i < pts.size(); ++i) {
         Vec2 a = pts[i], b = pts[(i + 1) % pts.size()];
@@ -142,7 +184,7 @@ std::vector<Polygon> triangulateConcave(const Polygon& poly) {
             int iNext = idx[(i + 1) % m];
 
             Vec2 a = pts[iPrev], b = pts[iCurr], c = pts[iNext];
-            if (cross2D(a, b, c) * orient <= 1e-7) continue; // reflex vertex
+            if (cross2D(a, b, c) * orient <= 1e-7) continue;
 
             bool hasPointInside = false;
             for (int j = 0; j < m; ++j) {
@@ -166,7 +208,6 @@ std::vector<Polygon> triangulateConcave(const Polygon& poly) {
     if (idx.size() == 3) {
         tris.push_back({pts[idx[0]], pts[idx[1]], pts[idx[2]]});
     } else if (idx.size() > 3) {
-        // Fallback fan for any remaining degenerate loop
         for (size_t i = 1; i + 1 < idx.size(); ++i) {
             tris.push_back({pts[idx[0]], pts[idx[i]], pts[idx[i + 1]]});
         }
@@ -252,9 +293,16 @@ void CalendarScrapbookApp::init(const gl::Texture& photoTex, const gl::Texture& 
     highlightedDay_ = 5;
     view_           = VIEW_CALENDAR;
 
-    // Seed initial saved layouts for days 1..5 on first run so the calendar has
-    // saved pages with thumbnails out of the box, and preserves any user edits thereafter.
-    for (int d : {1, 2, 3, 4, 5}) {
+    // Generate all 8 distinct daily theme textures on the GPU when an OpenGL context is active
+    if (fontTex_.id != 0 || photoTex_.id != 0) {
+        for (int i = 0; i < kNumPhotoThemes; ++i) {
+            Framebuffer img = makeDayPhoto(i, 360, 270);
+            themePhotos_[i] = gl::createTexture(img, false);
+        }
+    }
+
+    // Seed saved layouts across the month so the calendar showcases rich daily photo thumbnails
+    for (int d : {1, 2, 3, 4, 5, 8, 14, 22}) {
         if (!hasSavedDayLayout(saveDir_, calLayout_.year, calLayout_.month, d)) {
             DayLayout seeded = makeDefaultDayLayout(calLayout_.year, calLayout_.month, d, defaultPhotoPath_);
             saveDayLayout(seeded, dayLayoutPath(saveDir_, calLayout_.year, calLayout_.month, d));
@@ -267,6 +315,21 @@ void CalendarScrapbookApp::init(const gl::Texture& photoTex, const gl::Texture& 
 
 void CalendarScrapbookApp::shutdown() {
     clearMonthThumbnails();
+    for (auto& tex : themePhotos_) {
+        gl::deleteTexture(tex);
+    }
+}
+
+const gl::Texture& CalendarScrapbookApp::textureForDay(const DayLayout& layout) const {
+    if (!layout.photoPath.empty() && layout.photoPath != "demo" &&
+        layout.photoPath.rfind("theme:", 0) != 0 && photoTex_.id != 0) {
+        return photoTex_;
+    }
+    int theme = parsePhotoTheme(layout.photoPath, layout.day);
+    if (themePhotos_[theme].id != 0) {
+        return themePhotos_[theme];
+    }
+    return photoTex_;
 }
 
 void CalendarScrapbookApp::clearMonthThumbnails() {
@@ -278,13 +341,13 @@ void CalendarScrapbookApp::clearMonthThumbnails() {
 
 void CalendarScrapbookApp::refreshMonthThumbnails() {
     clearMonthThumbnails();
-    if (!fontTex_.id && !photoTex_.id) return; // headless / no GL context
+    if (!fontTex_.id && !photoTex_.id) return;
 
     for (int d = 1; d <= calLayout_.daysInMonth; ++d) {
         if (hasSavedDayLayout(saveDir_, calLayout_.year, calLayout_.month, d)) {
             DayLayout saved;
             if (loadDayLayout(dayLayoutPath(saveDir_, calLayout_.year, calLayout_.month, d), saved)) {
-                Framebuffer thumbFb = renderDayThumbnail(saved, 78, 40);
+                Framebuffer thumbFb = renderDayThumbnail(saved, 82, 44);
                 monthThumbs_[d] = gl::createTexture(thumbFb, false);
             }
         }
@@ -298,7 +361,7 @@ void CalendarScrapbookApp::updateDayThumbnail(int day, const DayLayout& layout) 
         gl::deleteTexture(it->second);
         monthThumbs_.erase(it);
     }
-    Framebuffer thumbFb = renderDayThumbnail(layout, 78, 40);
+    Framebuffer thumbFb = renderDayThumbnail(layout, 82, 44);
     monthThumbs_[day] = gl::createTexture(thumbFb, false);
 }
 
@@ -306,6 +369,10 @@ DayLayout CalendarScrapbookApp::loadOrCreateDay(int year, int month, int day) co
     std::string path = dayLayoutPath(saveDir_, year, month, day);
     DayLayout loaded;
     if (loadDayLayout(path, loaded)) {
+        // Upgrade legacy "demo" photo tag to the day's distinct photo theme
+        if (loaded.photoPath.empty() || loaded.photoPath == "demo") {
+            loaded.photoPath = makePhotoThemeSpec(photoThemeForDay(year, month, day));
+        }
         return loaded;
     }
     return makeDefaultDayLayout(year, month, day, defaultPhotoPath_);
@@ -319,6 +386,13 @@ bool CalendarScrapbookApp::saveCurrentDay() {
         updateDayThumbnail(currentDay_.day, currentDay_);
     }
     return ok;
+}
+
+void CalendarScrapbookApp::cycleDayPhotoTheme() {
+    int curTheme = parsePhotoTheme(currentDay_.photoPath, currentDay_.day);
+    int nextTheme = (curTheme + 1) % kNumPhotoThemes;
+    currentDay_.photoPath = makePhotoThemeSpec(nextTheme);
+    saveCurrentDay();
 }
 
 void CalendarScrapbookApp::selectDayOnCalendar(int day, bool openAfterMove) {
@@ -346,7 +420,6 @@ void CalendarScrapbookApp::openDayPage(int day, bool withPageTurn) {
     selectedElem_   = -1;
     dragging_       = false;
 
-    // Ensure the opened day is saved so it gets a thumbnail on the calendar
     saveCurrentDay();
 
     if (withPageTurn) {
@@ -431,7 +504,9 @@ void CalendarScrapbookApp::update(double dt) {
 // ---------------------------------------------------------------------------
 
 void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, double my) {
-    if (button != 0) return; // left mouse button
+    mouseX_ = mx;
+    mouseY_ = my;
+    if (button != 0) return;
 
     if (action == 0) { // GLFW_RELEASE
         if (dragging_) {
@@ -444,12 +519,12 @@ void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, doub
     if (action != 1) return; // GLFW_PRESS
 
     if (view_ == VIEW_CALENDAR) {
-        // Month navigation buttons '<' and '>'
-        if (insideRect(mx, my, 175, 56, 230, 94)) {
+        // Month navigation buttons 'PREV' and 'NEXT'
+        if (insideRect(mx, my, 76, 46, 174, 80)) {
             navigateMonth(-1);
             return;
         }
-        if (insideRect(mx, my, 590, 56, 645, 94)) {
+        if (insideRect(mx, my, 646, 46, 744, 80)) {
             navigateMonth(+1);
             return;
         }
@@ -465,28 +540,34 @@ void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, doub
         return;
     }
 
-    // ---- VIEW_DAY_PAGE ----
-    // Top toolbar buttons
-    if (insideRect(mx, my, 82, 38, 226, 68)) {
+    // ---- VIEW_DAY_PAGE top toolbar buttons ----
+    if (insideRect(mx, my, 74, 38, 194, 68)) {
         returnToCalendar(true);
         return;
     }
-    if (insideRect(mx, my, 236, 38, 342, 68)) {
+    if (insideRect(mx, my, 202, 38, 278, 68)) {
         int prevDay = (highlightedDay_ > 1) ? (highlightedDay_ - 1) : calLayout_.daysInMonth;
         openDayPage(prevDay, true);
         return;
     }
-    if (insideRect(mx, my, 350, 38, 456, 68)) {
+    if (insideRect(mx, my, 284, 38, 360, 68)) {
         int nextDay = (highlightedDay_ < calLayout_.daysInMonth) ? (highlightedDay_ + 1) : 1;
         openDayPage(nextDay, true);
         return;
     }
-    if (insideRect(mx, my, 466, 38, 610, 68)) {
-        // Add a new sticker with drop-and-settle animation
-        onKey(65, 1); // 'A'
+    if (insideRect(mx, my, 368, 38, 462, 68)) {
+        cycleDayPhotoTheme();
         return;
     }
-    if (insideRect(mx, my, 618, 38, 756, 68)) {
+    if (insideRect(mx, my, 470, 38, 572, 68)) {
+        onKey(70, 1); // 'F' cycle filter
+        return;
+    }
+    if (insideRect(mx, my, 580, 38, 686, 68)) {
+        onKey(65, 1); // 'A' add sticker
+        return;
+    }
+    if (insideRect(mx, my, 694, 38, 758, 68)) {
         triggerDropAnimation(-1);
         return;
     }
@@ -503,7 +584,6 @@ void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, doub
     }
 
     if (hitIdx >= 0) {
-        // Bring selected element to the front (highest zOrder)
         int maxZ = 0;
         for (const auto& e : currentDay_.elements) maxZ = std::max(maxZ, e.zOrder);
         currentDay_.elements[hitIdx].zOrder = maxZ + 1;
@@ -522,17 +602,23 @@ void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, doub
 }
 
 void CalendarScrapbookApp::onCursorPos(double mx, double my) {
+    mouseX_ = mx;
+    mouseY_ = my;
+    if (view_ == VIEW_CALENDAR) {
+        hoveredDay_ = dayAt(calLayout_, (int)mx, (int)my);
+        return;
+    }
     if (view_ == VIEW_DAY_PAGE && dragging_ &&
         selectedElem_ >= 0 && selectedElem_ < (int)currentDay_.elements.size()) {
         currentDay_.elements[selectedElem_].xform.position = {
             std::clamp(mx + dragOffset_.x, 85.0, 755.0),
-            std::clamp(my + dragOffset_.y, 75.0, 555.0)
+            std::clamp(my + dragOffset_.y, 75.0, 525.0)
         };
     }
 }
 
 void CalendarScrapbookApp::onKey(int key, int action) {
-    if (action != 1 && action != 2) return; // GLFW_PRESS or GLFW_REPEAT
+    if (action != 1 && action != 2) return;
 
     if (view_ == VIEW_CALENDAR) {
         if (key == 263) { // Left
@@ -543,11 +629,11 @@ void CalendarScrapbookApp::onKey(int key, int action) {
             selectDayOnCalendar(std::max(1, highlightedDay_ - 7), false);
         } else if (key == 264) { // Down
             selectDayOnCalendar(std::min(calLayout_.daysInMonth, highlightedDay_ + 7), false);
-        } else if (key == 257 || key == 335) { // Enter / KP_Enter
+        } else if (key == 257 || key == 335) { // Enter
             openDayPage(highlightedDay_, true);
-        } else if (key == 44 || key == 91) { // ',' or '[' -> previous month
+        } else if (key == 44 || key == 91) { // ',' or '['
             navigateMonth(-1);
-        } else if (key == 46 || key == 93) { // '.' or ']' -> next month
+        } else if (key == 46 || key == 93) { // '.' or ']'
             navigateMonth(+1);
         }
         return;
@@ -568,6 +654,10 @@ void CalendarScrapbookApp::onKey(int key, int action) {
         openDayPage(prevDay, true);
         return;
     }
+    if (key == 67) { // 'C' -> Cycle daily photo scene
+        cycleDayPhotoTheme();
+        return;
+    }
     if (key == 68) { // 'D' -> Replay live drop-and-settle animation
         triggerDropAnimation(-1);
         return;
@@ -585,6 +675,7 @@ void CalendarScrapbookApp::onKey(int key, int action) {
     }
     if (key == 70) { // 'F' -> Cycle photo filter on the day page
         currentDay_.photoFilter = (currentDay_.photoFilter + 1) % 7;
+        currentDay_.filterStrength = (currentDay_.photoFilter == 0) ? 0.0f : 0.75f;
         saveCurrentDay();
         return;
     }
@@ -603,7 +694,7 @@ void CalendarScrapbookApp::onKey(int key, int action) {
         SavedElement ne;
         ne.kind           = kPalette[idx];
         ne.xform.pivot    = {0, 0};
-        ne.xform.position = {320.0 + (idx * 55.0), 210.0 + ((idx % 3) * 85.0)};
+        ne.xform.position = {490.0 + (idx % 3) * 75.0, 165.0 + (idx % 4) * 65.0};
         ne.xform.rotation = (idx % 2 == 0) ? 12.0 : -14.0;
         ne.xform.scale    = {1.0, 1.0};
         ne.fill           = kFills[idx];
@@ -617,7 +708,6 @@ void CalendarScrapbookApp::onKey(int key, int action) {
         return;
     }
 
-    // Selected sticker transforms (rotate, scale, delete)
     if (selectedElem_ >= 0 && selectedElem_ < (int)currentDay_.elements.size()) {
         SavedElement& sel = currentDay_.elements[selectedElem_];
         bool changed = false;
@@ -645,12 +735,36 @@ void CalendarScrapbookApp::onKey(int key, int action) {
 }
 
 // ---------------------------------------------------------------------------
-// OpenGL Rendering: Calendar Month View, Day Page View & Live Page-Turn
+// Cohesive Scrapbook Notebook Shell & OpenGL Rendering
 // ---------------------------------------------------------------------------
+
+void CalendarScrapbookApp::renderNotebookShell() {
+    // 1. Warm kraft desk surface + dark leather left binder spine
+    drawRectGL(0, 0, 800, 600, kBrown);
+    drawRectGL(0, 0, 46, 600, kLeather);
+    drawRectGL(44, 0, 48, 600, Color{72, 46, 28, 255});
+
+    // 2. Multi-layered page card drop shadow + cream journal card
+    drawRectGL(62, 32, 782, 582, Color{84, 54, 34, 140});
+    drawRectGL(58, 28, 778, 578, kShadow);
+    drawRectGL(52, 22, 772, 572, kCream, kBrown);
+
+    // Inner stitched journal frame
+    gl::drawPolyline(rectPoly(60, 30, 764, 564), Mat3::identity(), Color{214, 174, 118, 255});
+
+    // 3. Binder holes + metallic spiral rings connecting the spine to the page
+    Polygon hole = makeRegularPolygon({0, 0}, 9, 20);
+    for (int y = 62; y <= 542; y += 68) {
+        gl::drawPolygon(hole, Mat3::translate(26, y), kDark);
+        gl::drawPolygon(hole, Mat3::translate(68, y), kDark);
+        // Spiral ring bar bridging spine hole to page hole
+        drawRectGL(22, y - 4, 72, y + 4, Color{224, 214, 196, 255}, kDark);
+        drawRectGL(24, y - 2, 70, y,      kWhite);
+    }
+}
 
 void CalendarScrapbookApp::render() {
     if (pageTurnAnim_.active) {
-        // Draw destination view underneath, then overlay the curling outgoing page
         if (pageTurnAnim_.toView == VIEW_DAY_PAGE) {
             renderDayPageView(currentDay_, true);
         } else {
@@ -668,45 +782,37 @@ void CalendarScrapbookApp::render() {
 }
 
 void CalendarScrapbookApp::renderCalendarView() {
-    // 1. Binder backing & holes
-    drawRectGL(0, 0, 800, 600, kBrown);
-    Polygon hole = makeRegularPolygon({0, 0}, 11, 20);
-    for (int y = 60; y < 580; y += 70) {
-        gl::drawPolygon(hole, Mat3::translate(28, y), kDark);
-    }
+    renderNotebookShell();
 
-    // 2. Paper card with drop shadow and stitched border
-    drawRectGL(61, 37, 776, 577, kShadow);
-    drawRectGL(55, 30, 770, 570, kCream, kBrown);
-    gl::drawPolyline(rectPoly(63, 38, 762, 562), Mat3::identity(), Color{214, 170, 110, 255});
+    // 1. Cohesive Header Banner + Month Navigation Buttons
+    bool prevHover = insideRect(mouseX_, mouseY_, 76, 46, 174, 80);
+    bool nextHover = insideRect(mouseX_, mouseY_, 646, 46, 744, 80);
+    drawButtonGL(fontTex_, 76, 46, 174, 80, "PREV", kPaper, kDark, prevHover);
+    drawButtonGL(fontTex_, 646, 46, 744, 80, "NEXT", kPaper, kDark, nextHover);
 
-    // Corner washi tape strips
-    Polygon tape = rectPoly(-50, -12, 50, 12);
-    gl::drawPolygon(tape, Mat3::translate(100, 42) * Mat3::rotate(-0.40), Color{228, 165, 69, 195});
-    gl::drawPolygon(tape, Mat3::translate(725, 42) * Mat3::rotate( 0.35), Color{110, 145, 121, 195});
-
-    // 3. Month header and '<' / '>' navigation buttons
-    drawButtonGL(fontTex_, 175, 56, 230, 92, "-", kPaper, kDark);
-    drawButtonGL(fontTex_, 590, 56, 645, 92, "+", kPaper, kDark);
+    // Center ribbon banner for month title
+    Polygon banner = makeRibbon({410, 64}, 430, 44, 14);
+    drawConcavePolygonGL(banner, Mat3::translate(3, 4), Color{77, 74, 63, 75});
+    drawConcavePolygonGL(banner, Mat3::identity(), kHoney);
+    gl::drawPolyline(banner, Mat3::identity(), kBrown);
 
     std::string title = monthTitle(calLayout_.year, calLayout_.month);
-    float titleScale = 4.0f;
-    float titleW = (float)title.size() * 4.0f * titleScale - titleScale;
-    gl::drawStampText(fontTex_, title, 412.0f - titleW * 0.5f + 2.0f, 66.0f, titleScale, kShadow);
-    gl::drawStampText(fontTex_, title, 412.0f - titleW * 0.5f,        64.0f, titleScale, kDark);
+    drawCrispTextCentered(fontTex_, title, 410, 58, 3, kDark, true, kWhite);
+    drawCrispTextCentered(fontTex_, "DAILY PHOTO JOURNAL", 410, 76, 1, kBrown);
 
-    // 4. Weekday column header row
-    static const char* kWeekdays[7] = {"S", "M", "T", "W", "T", "F", "S"};
+    // 2. Weekday Column Header Bar (3-letter names at crisp integer scale = 2)
+    static const char* kWeekdays[7] = {"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"};
     for (int c = 0; c < 7; ++c) {
         double x0 = calLayout_.x0 + c * calLayout_.cw;
         double y0 = calLayout_.y0 - calLayout_.hdr;
-        drawRectGL(x0, y0, x0 + calLayout_.cw, calLayout_.y0, kGreen, kBrown);
-        gl::drawStampText(fontTex_, kWeekdays[c],
-                          (float)(x0 + calLayout_.cw * 0.5 - 5.0),
-                          (float)(y0 + 9.0), 3.0f, kPaper);
+        Color hdrBg = (c == 0 || c == 6) ? kDeepGreen : kGreen;
+        drawRectGL(x0, y0, x0 + calLayout_.cw, calLayout_.y0, hdrBg, kBrown);
+        drawCrispTextCentered(fontTex_, kWeekdays[c],
+                              x0 + calLayout_.cw * 0.5, y0 + calLayout_.hdr * 0.5,
+                              2, kWhite, true, kDark);
     }
 
-    // 5. Grid cells
+    // 3. Calendar Grid Cells
     const int numRows = calLayout_.rows();
     for (int r = 0; r < numRows; ++r) {
         for (int c = 0; c < 7; ++c) {
@@ -717,51 +823,58 @@ void CalendarScrapbookApp::renderCalendarView() {
         }
     }
 
-    // 6. Saved-page thumbnails, mini badges, and day numbers
+    // 4. Saved-Page Photo Thumbnails, Hover Highlight, and Crisp Day Numbers
     int starCoveredDay = highlightAnim_.active ? 0 : highlightedDay_;
     for (int d = 1; d <= calLayout_.daysInMonth; ++d) {
         int x0, y0, x1, y1;
         cellRect(calLayout_, d, x0, y0, x1, y1);
 
-        // Draw saved layout thumbnail inside the cell if this day has been saved
+        // Hover highlight when mouse is over this cell
+        if (d == hoveredDay_ && !highlightAnim_.active) {
+            drawRectGL(x0 + 2, y0 + 2, x1 - 2, y1 - 2, Color{249, 205, 125, 110}, kTerracotta);
+        }
+
+        // Draw saved layout thumbnail (mini Polaroid with that day's photo + stickers)
         auto thumbIt = monthThumbs_.find(d);
         if (thumbIt != monthThumbs_.end() && thumbIt->second.id != 0) {
-            double tx = x0 + 8.0;
-            double ty = y0 + 22.0;
-            double tw = calLayout_.cw - 16.0;
-            double th = std::max(20.0, (double)calLayout_.ch - 26.0);
+            double tx = x0 + 6.0;
+            double ty = y0 + 18.0;
+            double tw = calLayout_.cw - 12.0;
+            double th = std::max(20.0, (double)calLayout_.ch - 22.0);
+            drawRectGL(tx + 2, ty + 2, tx + tw + 2, ty + th + 2, Color{64, 58, 48, 65});
             Mat3 thumbM = Mat3::translate(tx, ty)
                         * Mat3::scale(tw / (double)thumbIt->second.width,
                                       th / (double)thumbIt->second.height);
-            gl::drawTexture(thumbIt->second, thumbM, 0.95f);
+            gl::drawTexture(thumbIt->second, thumbM, 1.0f);
 
-            // Small corner sticker badge indicating a saved scrapbook page
-            Polygon badge = (d % 2 == 0) ? makeStar({0, 0}, 9, 4) : makeHeart({0, 0}, 14);
+            // Corner sticker badge showing a saved scrapbook entry
+            Polygon badge = (d % 2 == 0) ? makeStar({0, 0}, 8, 4) : makeHeart({0, 0}, 13);
             Color badgeCol = (d % 2 == 0) ? kMustard : kTerracotta;
-            drawConcavePolygonGL(badge, Mat3::translate(x1 - 12.0, y0 + 12.0), badgeCol);
+            drawConcavePolygonGL(badge, Mat3::translate(x1 - 11.0, y0 + 10.0), badgeCol);
         }
 
+        // Crisp integer scale=2 day number in top-left of cell
         if (d != starCoveredDay) {
-            gl::drawStampText(fontTex_, std::to_string(d),
-                              (float)(x0 + 6), (float)(y0 + 5), 2.5f, kDark);
+            std::string dStr = std::to_string(d);
+            int nw = crispTextWidth(dStr, 2);
+            drawRectGL(x0 + 3, y0 + 3, x0 + 7 + nw, y0 + 16, Color{255, 252, 245, 210});
+            drawCrispText(fontTex_, dStr, x0 + 5, y0 + 5, 2, kDark);
         }
     }
 
-    // 7. Highlighted day star marker + smooth highlight move animation
-    Polygon outerStar = makeStar({0, 0}, 30, 14);
-    Polygon innerStar = makeStar({0, 0}, 20, 9);
+    // 5. Highlighted Day Star Marker + Smooth Highlight Move Animation
+    Polygon outerStar = makeStar({0, 0}, 28, 13);
+    Polygon innerStar = makeStar({0, 0}, 19, 9);
 
     if (highlightAnim_.active) {
         double rawT = easing::clamp01(highlightAnim_.elapsed / highlightAnim_.duration);
         double u    = easing::easeInOutCubic(rawT);
 
-        // Destination cell warm glow
         int tx0, ty0, tx1, ty1;
         cellRect(calLayout_, highlightAnim_.toDay, tx0, ty0, tx1, ty1);
-        drawRectGL(tx0 + 3, ty0 + 3, tx1 - 3, ty1 - 3,
+        drawRectGL(tx0 + 2, ty0 + 2, tx1 - 2, ty1 - 2,
                    Color{249, 205, 125, (uint8_t)(160 * u)});
 
-        // Ghost star trail sampled along our quadratic Bezier highlight path
         for (int k = 5; k >= 1; --k) {
             double trailT = rawT - k * 0.04;
             if (trailT <= 0.0) continue;
@@ -774,7 +887,6 @@ void CalendarScrapbookApp::renderCalendarView() {
             drawConcavePolygonGL(outerStar, tm, Color{228, 165, 69, alpha});
         }
 
-        // Main gliding star with lift shadow and landing bounce
         Vec2 pos = highlightCentre(calLayout_, highlightAnim_.fromDay, highlightAnim_.toDay, rawT);
         double lift = std::sin(M_PI * u);
         double scale = 1.0 + 0.30 * lift;
@@ -782,14 +894,13 @@ void CalendarScrapbookApp::renderCalendarView() {
 
         Mat3 shadowM = Mat3::translate(pos.x + 4.0 + 14.0 * lift, pos.y + 5.0 + 18.0 * lift)
                      * Mat3::rotate(angle) * Mat3::scale(scale, scale);
-        drawConcavePolygonGL(outerStar, shadowM, Color{77, 74, 63, 85});
+        drawConcavePolygonGL(outerStar, shadowM, Color{64, 58, 48, 90});
 
         Mat3 starM = Mat3::translate(pos.x, pos.y) * Mat3::rotate(angle) * Mat3::scale(scale, scale);
         drawConcavePolygonGL(outerStar, starM, kMustard);
         gl::drawPolyline(outerStar, starM, Color{150, 100, 30, 255});
         drawConcavePolygonGL(innerStar, starM, kHoney);
 
-        // Confetti burst as the highlight lands
         double burstT = segmentT(rawT, 0.75, 1.0);
         if (burstT > 0.0 && burstT < 1.0) {
             Vec2 destC = cellCentre(calLayout_, highlightAnim_.toDay);
@@ -807,64 +918,84 @@ void CalendarScrapbookApp::renderCalendarView() {
             }
         }
     } else {
-        Vec2 hc = cellCentre(calLayout_, highlightedDay_);
+        int hx0, hy0, hx1, hy1;
+        cellRect(calLayout_, highlightedDay_, hx0, hy0, hx1, hy1);
+        gl::drawPolyline(rectPoly(hx0 + 1, hy0 + 1, hx1 - 1, hy1 - 1), Mat3::identity(), kTerracotta);
+
+        // Place the star badge near top-left/center so any saved photo thumbnail underneath stays visible
+        Vec2 hc{hx0 + 26.0, hy0 + 24.0};
+        if (monthThumbs_.find(highlightedDay_) == monthThumbs_.end()) {
+            hc = cellCentre(calLayout_, highlightedDay_);
+        }
         double pulse = 1.0 + 0.05 * std::sin(pulseClock_ * 3.5);
-        Mat3 shadowM = Mat3::translate(hc.x + 4.0, hc.y + 5.0) * Mat3::scale(pulse, pulse);
+        Mat3 shadowM = Mat3::translate(hc.x + 3.0, hc.y + 4.0) * Mat3::scale(pulse, pulse);
         Mat3 starM   = Mat3::translate(hc.x, hc.y) * Mat3::scale(pulse, pulse);
-        drawConcavePolygonGL(outerStar, shadowM, Color{77, 74, 63, 75});
+        drawConcavePolygonGL(outerStar, shadowM, Color{64, 58, 48, 85});
         drawConcavePolygonGL(outerStar, starM, kMustard);
         gl::drawPolyline(outerStar, starM, Color{150, 100, 30, 255});
         drawConcavePolygonGL(innerStar, starM, kHoney);
 
-        std::string num = std::to_string(highlightedDay_);
-        float nw = (float)num.size() * 4.0f * 2.8f - 2.8f;
-        gl::drawStampText(fontTex_, num, (float)hc.x - nw * 0.5f, (float)hc.y - 7.0f, 2.8f, kDark);
+        drawCrispTextCentered(fontTex_, std::to_string(highlightedDay_), hc.x, hc.y, 2, kDark, true, kWhite);
     }
 
-    // 8. Footer instructions bar
-    gl::drawStampText(fontTex_, "CLICK DAY OR ENTER TO OPEN PAGE   ARROWS MOVE   SAVED PAGES SHOW THUMBNAILS",
-                      76.0f, 548.0f, 1.8f, kDark);
+    // 6. Cohesive Bottom Status Ribbon (crisp integer scale = 2)
+    drawRectGL(70, 536, 756, 560, kDeepGreen, kBrown);
+    int theme = photoThemeForDay(calLayout_.year, calLayout_.month, highlightedDay_);
+    std::string footer = "DAY " + std::to_string(highlightedDay_) + " - " + photoThemeCaption(theme)
+                       + " - CLICK OR ENTER TO OPEN PAGE";
+    drawCrispTextCentered(fontTex_, footer, 413, 548, 2, kWhite, true, kDark);
 }
 
 void CalendarScrapbookApp::renderDayPageView(const DayLayout& layout, bool applyDropAnim) {
-    // 1. Binder backing & holes
-    drawRectGL(0, 0, 800, 600, kBrown);
-    Polygon hole = makeRegularPolygon({0, 0}, 11, 20);
-    for (int y = 60; y < 580; y += 70) {
-        gl::drawPolygon(hole, Mat3::translate(28, y), kDark);
-    }
+    renderNotebookShell();
 
-    // 2. Scrapbook card + shadow
-    drawRectGL(76, 37, 776, 577, kShadow);
-    drawRectGL(70, 30, 770, 570, kCream, kBrown);
+    // 1. Top Cohesive Toolbar with Hover States (crisp integer scale = 2)
+    drawButtonGL(fontTex_,  74, 38, 194, 68, "CALENDAR", kGreen,      kWhite, insideRect(mouseX_, mouseY_,  74, 38, 194, 68));
+    drawButtonGL(fontTex_, 202, 38, 278, 68, "PREV",     kPaper,      kDark,  insideRect(mouseX_, mouseY_, 202, 38, 278, 68));
+    drawButtonGL(fontTex_, 284, 38, 360, 68, "NEXT",     kPaper,      kDark,  insideRect(mouseX_, mouseY_, 284, 38, 360, 68));
+    drawButtonGL(fontTex_, 368, 38, 462, 68, "PHOTO",    kHoney,      kDark,  insideRect(mouseX_, mouseY_, 368, 38, 462, 68));
+    drawButtonGL(fontTex_, 470, 38, 572, 68, "FILTER",   kSage,       kDark,  insideRect(mouseX_, mouseY_, 470, 38, 572, 68));
+    drawButtonGL(fontTex_, 580, 38, 686, 68, "STICKER",  kMustard,    kDark,  insideRect(mouseX_, mouseY_, 580, 38, 686, 68));
+    drawButtonGL(fontTex_, 694, 38, 758, 68, "DROP",     kTerracotta, kWhite, insideRect(mouseX_, mouseY_, 694, 38, 758, 68));
 
-    // 3. Top interactive toolbar
-    drawButtonGL(fontTex_,  82, 38, 226, 68, "CALENDAR B", kGreen,   kWhite);
-    drawButtonGL(fontTex_, 236, 38, 342, 68, "PREV P",     kPaper,   kDark);
-    drawButtonGL(fontTex_, 350, 38, 456, 68, "NEXT N",     kPaper,   kDark);
-    drawButtonGL(fontTex_, 466, 38, 610, 68, "ADD STICKER", kMustard, kDark);
-    drawButtonGL(fontTex_, 618, 38, 756, 68, "DROP D",     kHoney,   kDark);
+    // 2. Left Side: Polaroid Photo Card with This Day's Distinct Photograph
+    drawRectGL(110, 92, 466, 456, Color{64, 58, 48, 75});
+    drawRectGL(102, 84, 458, 448, kWhite, kBrown);
 
-    // 4. Polaroid frame + filtered photo texture
-    drawRectGL(126, 86, 486, 426, kShadow);
-    drawRectGL(120, 80, 480, 420, kWhite, kBrown);
-
-    if (photoTex_.id != 0) {
+    const gl::Texture& dayTex = textureForDay(layout);
+    if (dayTex.id != 0) {
         FilterParams fp;
         fp.kind     = (FilterKind)std::clamp(layout.photoFilter, 0, (int)FILTER_COUNT - 1);
         fp.strength = layout.filterStrength;
-        Mat3 photoM = Mat3::translate(140.0, 96.0)
-                    * Mat3::scale(320.0 / (double)photoTex_.width,
-                                  260.0 / (double)photoTex_.height);
-        gl::drawTexture(photoTex_, photoM, 1.0f, fp);
+        fp.amount   = (fp.kind == FILTER_CONTRAST) ? 1.45f : 0.18f;
+        fp.tint     = {235, 165, 120, 255};
+        Mat3 photoM = Mat3::translate(118.0, 98.0)
+                    * Mat3::scale(324.0 / (double)dayTex.width,
+                                  264.0 / (double)dayTex.height);
+        gl::drawTexture(dayTex, photoM, 1.0f, fp);
     }
-    gl::drawPolyline(rectPoly(140, 96, 460, 356), Mat3::identity(), kDark);
+    gl::drawPolyline(rectPoly(118, 98, 442, 362), Mat3::identity(), kDark);
 
-    // Caption on the bottom margin of the polaroid
-    std::string cap = "MEMORY " + layout.dateText;
-    gl::drawStampText(fontTex_, cap, 210.0f, 382.0f, 2.5f, kDark);
+    // Polaroid Bottom Caption Area (Scene Title at scale=3 + Date/Filter at scale=2)
+    int theme = parsePhotoTheme(layout.photoPath, layout.day);
+    std::string sceneTitle = photoThemeCaption(theme);
+    drawCrispTextCentered(fontTex_, sceneTitle, 280, 388, 3, kDark, true, kCream);
 
-    // 5. Z-ordered elements (washi tape, stickers, date stamp) with live drop-and-settle
+    std::string subCaption = layout.dateText + "   FILTER " + shortFilterLabel(layout.photoFilter);
+    drawCrispTextCentered(fontTex_, subCaption, 280, 422, 2, kBrown);
+
+    // 3. Right Side: Lined Journal Note Card Backdrop for Stickers
+    drawRectGL(482, 92, 754, 424, Color{64, 58, 48, 55});
+    drawRectGL(476, 86, 748, 418, kPaper, kBrown);
+    // Red vertical margin line & horizontal ruled notebook lines
+    drawRectGL(506, 86, 508, 418, Color{216, 130, 118, 160});
+    for (int ry = 132; ry <= 396; ry += 24) {
+        drawRectGL(478, ry, 746, ry + 1, Color{195, 205, 215, 160});
+    }
+    std::string noteHdr = "DAY " + std::to_string(layout.day) + " JOURNAL";
+    drawCrispTextCentered(fontTex_, noteHdr, 612, 108, 2, kDeepGreen, true, kWhite);
+
+    // 4. Z-ordered Stickers, Washi Tape & Notched Date Stamp with Live Drop-and-Settle
     double dropT = (applyDropAnim && dropAnim_.active)
                        ? easing::clamp01(dropAnim_.elapsed / dropAnim_.duration)
                        : 1.0;
@@ -884,11 +1015,10 @@ void CalendarScrapbookApp::renderDayPageView(const DayLayout& layout, bool apply
         Polygon base = buildShapePolygon(elem.kind);
         Mat3 M = xf.toMat3();
 
-        // Soft drop shadow for opaque stickers
         if (elem.fill.a >= 240) {
             double liftOffset = (applyDropAnim && dropAnim_.active) ? (1.0 - dropT) * 14.0 : 0.0;
             Mat3 shadowM = Mat3::translate(5.0 + liftOffset, 6.0 + liftOffset) * M;
-            drawConcavePolygonGL(base, shadowM, Color{214, 186, 140, 220});
+            drawConcavePolygonGL(base, shadowM, Color{64, 58, 48, 85});
         }
 
         drawConcavePolygonGL(base, M, elem.fill);
@@ -896,17 +1026,18 @@ void CalendarScrapbookApp::renderDayPageView(const DayLayout& layout, bool apply
             gl::drawPolyline(base, M, elem.edge);
         }
 
-        // Date stamp text inside the DATE_STAMP element
+        // Crisp date stamp text inside the DATE_STAMP element
         if (elem.kind == ShapeKind::DATE_STAMP) {
             std::string dtxt = layout.dateText.empty()
                                    ? formatDateStamp(layout.year, layout.month, layout.day)
                                    : layout.dateText;
-            float sc = 3.2f;
-            float tw = (float)dtxt.size() * 4.0f * sc - sc;
-            gl::drawStampText(fontTex_, dtxt, -tw * 0.5f, -2.5f * sc, sc, kDark, M);
+            float sc = 3.0f;
+            float tw = (float)crispTextWidth(dtxt, 3);
+            gl::drawStampText(fontTex_, dtxt, -tw * 0.5f + 1.0f, -7.5f + 1.0f, sc, kCream, M);
+            gl::drawStampText(fontTex_, dtxt, -tw * 0.5f,        -7.5f,        sc, kTerracotta, M);
         }
 
-        // Selection box around active sticker
+        // Selection frame around active sticker
         if (i == selectedElem_ && !pageTurnAnim_.active) {
             Polygon wp = transformPolygon(base, M);
             Vec2 mn, mx;
@@ -917,9 +1048,11 @@ void CalendarScrapbookApp::renderDayPageView(const DayLayout& layout, bool apply
         }
     }
 
-    // 6. Footer status and shortcut guide
-    gl::drawStampText(fontTex_, "DRAG STICKER   Q E ROTATE   PLUS MINUS SCALE   F FILTER   AUTOSAVED",
-                      84.0f, 548.0f, 1.8f, kDark);
+    // 5. Cohesive Bottom Status Ribbon (crisp integer scale = 2)
+    drawRectGL(74, 536, 756, 560, kDeepGreen, kBrown);
+    drawCrispTextCentered(fontTex_,
+                          "DRAG STICKER   Q E ROTATE   C PHOTO   F FILTER   B CALENDAR",
+                          415, 548, 2, kWhite, true, kDark);
 }
 
 void CalendarScrapbookApp::renderPageTurnOverlay() {
@@ -933,14 +1066,11 @@ void CalendarScrapbookApp::renderPageTurnOverlay() {
     foldLine.reserve(foldPts.size());
     for (const auto& p : foldPts) foldLine.push_back({p.x, p.y});
 
-    // 1. Outgoing page surface to the left of the curling fold
     Color outgoingSurface = (pageTurnAnim_.fromView == VIEW_CALENDAR) ? kCream : kPaper;
     drawConcavePolygonGL(clipRegion, Mat3::identity(), outgoingSurface);
 
-    // 2. Soft cast shadow immediately under the curled flap
     drawConcavePolygonGL(flapPoly, Mat3::translate(-18.0, 0.0), Color{30, 22, 15, 85});
 
-    // 3. Curled back-of-page paper flap along the cubic Bezier fold edge
     drawConcavePolygonGL(flapPoly, Mat3::identity(), Color{242, 220, 182, 245});
     gl::drawPolyline(flapPoly, Mat3::identity(), kBrown);
     gl::drawPolyline(foldLine, Mat3::identity(), kDark);
