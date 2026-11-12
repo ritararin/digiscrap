@@ -29,6 +29,33 @@ static void keyCB(GLFWwindow*, int key, int scancode, int action, int mods) {
         g_callbacks->onKey(key, action);
 }
 
+static void mouseButtonCB(GLFWwindow* win, int button, int action, int mods) {
+    (void)mods;
+    if (g_callbacks && g_callbacks->onMouseButton) {
+        double mx = 0.0, my = 0.0;
+        glfwGetCursorPos(win, &mx, &my);
+        int winW = 800, winH = 600;
+        glfwGetWindowSize(win, &winW, &winH);
+        if (winW > 0 && winH > 0) {
+            mx = mx * 800.0 / (double)winW;
+            my = my * 600.0 / (double)winH;
+        }
+        g_callbacks->onMouseButton(button, action, mx, my);
+    }
+}
+
+static void cursorPosCB(GLFWwindow* win, double mx, double my) {
+    if (g_callbacks && g_callbacks->onCursorPos) {
+        int winW = 800, winH = 600;
+        glfwGetWindowSize(win, &winW, &winH);
+        if (winW > 0 && winH > 0) {
+            mx = mx * 800.0 / (double)winW;
+            my = my * 600.0 / (double)winH;
+        }
+        g_callbacks->onCursorPos(mx, my);
+    }
+}
+
 // ---- Public API -------------------------------------------------------
 
 GLFWwindow* createWindow(int width, int height, const std::string& title) {
@@ -82,6 +109,8 @@ void runLoop(GLFWwindow* window, const WindowCallbacks& cb) {
     g_callbacks = const_cast<WindowCallbacks*>(&cb);
     glfwSetFramebufferSizeCallback(window, framebufferSizeCB);
     glfwSetKeyCallback(window, keyCB);
+    glfwSetMouseButtonCallback(window, mouseButtonCB);
+    glfwSetCursorPosCallback(window, cursorPosCB);
 
     double lastTime = glfwGetTime();
 

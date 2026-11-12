@@ -13,10 +13,12 @@ namespace gl {
 
 // Callbacks the host sets before entering the loop.
 struct WindowCallbacks {
-    std::function<void(int width, int height)> onResize;   // window resize
-    std::function<void(double dt)>             onUpdate;   // per-frame logic
-    std::function<void()>                      onRender;   // draw call
-    std::function<void(int key, int action)>   onKey;      // key event
+    std::function<void(int width, int height)>                      onResize;      // window resize
+    std::function<void(double dt)>                                  onUpdate;      // per-frame logic
+    std::function<void()>                                           onRender;      // draw call
+    std::function<void(int key, int action)>                        onKey;         // key event
+    std::function<void(int button, int action, double x, double y)> onMouseButton; // mouse button
+    std::function<void(double x, double y)>                         onCursorPos;   // cursor position
 };
 
 // Create the GLFW window + GL context.  Returns nullptr on failure.
