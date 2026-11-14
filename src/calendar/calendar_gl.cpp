@@ -472,6 +472,7 @@ bool CalendarScrapbookApp::saveCurrentDay() {
 }
 
 void CalendarScrapbookApp::addStickerFromPalette(int paletteIndex) {
+    interaction::EditScope editScope(history_, currentDay_, dragging_);
     int slotIdx = ((paletteIndex % kNumPaletteSlots) + kNumPaletteSlots) % kNumPaletteSlots;
     const PaletteSlot& slot = kStickerPalette[slotIdx];
 
@@ -500,6 +501,7 @@ void CalendarScrapbookApp::addStickerFromPalette(int paletteIndex) {
 }
 
 bool CalendarScrapbookApp::removeSelectedOrLastSticker() {
+    interaction::EditScope editScope(history_, currentDay_, dragging_);
     if (currentDay_.elements.empty()) return false;
     int idxToRemove = selectedElem_;
     if (idxToRemove < 0 || idxToRemove >= (int)currentDay_.elements.size()) {
@@ -514,6 +516,7 @@ bool CalendarScrapbookApp::removeSelectedOrLastSticker() {
 }
 
 bool CalendarScrapbookApp::rotateSelectedSticker(double deltaDegrees) {
+    interaction::EditScope editScope(history_, currentDay_, dragging_);
     if (currentDay_.elements.empty()) return false;
     if (selectedElem_ < 0 || selectedElem_ >= (int)currentDay_.elements.size()) {
         selectedElem_ = (int)currentDay_.elements.size() - 1;
@@ -526,6 +529,7 @@ bool CalendarScrapbookApp::rotateSelectedSticker(double deltaDegrees) {
 }
 
 bool CalendarScrapbookApp::scaleSelectedSticker(double factor) {
+    interaction::EditScope editScope(history_, currentDay_, dragging_);
     if (currentDay_.elements.empty()) return false;
     if (selectedElem_ < 0 || selectedElem_ >= (int)currentDay_.elements.size()) {
         selectedElem_ = (int)currentDay_.elements.size() - 1;
@@ -536,6 +540,80 @@ bool CalendarScrapbookApp::scaleSelectedSticker(double factor) {
     editingNote_ = false;
     saveCurrentDay();
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Option 4: duplicate, undo/redo, layer order, snapping (logic lives in src/interaction/)
+// ---------------------------------------------------------------------------
+
+bool CalendarScrapbookApp::duplicateSelectedSticker() {
+    interaction::EditScope editScope(history_, currentDay_, dragging_);
+    if (view_ != VIEW_DAY_PAGE) return false;
+    int idx = interaction::duplicateElement(currentDay_.elements, selectedElem_, pageArea_);
+    if (idx < 0) return false;
+    selectedElem_ = idx;
+    editingNote_  = false;
+    saveCurrentDay();
+    triggerDropAnimation(selectedElem_);       // the copy drops in like any new sticker
+    return true;
+}
+
+bool CalendarScrapbookApp::undoEdit() {
+    if (view_ != VIEW_DAY_PAGE) return false;
+    if (!history_.undo(currentDay_)) return false;
+    selectedElem_ = -1;
+    dragging_     = false;
+    dragMode_     = DRAG_NONE;
+    saveCurrentDay();
+    return true;
+}
+
+bool CalendarScrapbookApp::redoEdit() {
+    if (view_ != VIEW_DAY_PAGE) return false;
+    if (!history_.redo(currentDay_)) return false;
+    selectedElem_ = -1;
+    dragging_     = false;
+    dragMode_     = DRAG_NONE;
+    saveCurrentDay();
+    return true;
+}
+
+bool CalendarScrapbookApp::moveSelectedLayer(int delta) {
+    interaction::EditScope editScope(history_, currentDay_, dragging_);
+    if (view_ != VIEW_DAY_PAGE) return false;
+    int idx = interaction::moveLayer(currentDay_.elements, selectedElem_, delta);
+    if (idx < 0) return false;
+    selectedElem_ = idx;
+    saveCurrentDay();
+    return true;
+}
+
+bool CalendarScrapbookApp::handleInteractionKey(int key, int action) {
+    using interaction::Action;
+    const bool pressed = (action == 1);        // toggles must not flicker on key repeat
+    switch (interaction::actionForKey(key)) {
+        case Action::Duplicate:   if (pressed) duplicateSelectedSticker(); return true;
+        case Action::Undo:        undoEdit();                              return true;
+        case Action::Redo:        redoEdit();                              return true;
+        case Action::LayerUp:     moveSelectedLayer(+1);                   return true;
+        case Action::LayerDown:   moveSelectedLayer(-1);                   return true;
+        case Action::ToggleSnap:  if (pressed) snapEnabled_ = !snapEnabled_;     return true;
+        case Action::ToggleHelp:  if (pressed) helpShowsKeys_ = !helpShowsKeys_; return true;
+        case Action::None:        break;
+    }
+    return false;
+}
+
+// While a sticker is being dragged, pull it onto nearby alignment lines.
+void CalendarScrapbookApp::applySnapWhileDragging() {
+    snapGuides_ = {};
+    if (!snapEnabled_ || view_ != VIEW_DAY_PAGE || !dragging_ || dragMode_ != DRAG_MOVE) return;
+    if (selectedElem_ < 0 || selectedElem_ >= (int)currentDay_.elements.size()) return;
+    SavedElement& sel = currentDay_.elements[selectedElem_];
+    interaction::SnapResult r = interaction::snapElement(currentDay_.elements, selectedElem_,
+                                                         sel.xform.position, pageArea_);
+    sel.xform.position = pageArea_.clamp(r.position);
+    snapGuides_        = r.guides;
 }
 
 bool CalendarScrapbookApp::setCustomPhotoFromFile(const std::string& srcFilePath) {
@@ -704,6 +782,7 @@ void CalendarScrapbookApp::update(double dt) {
 // ---------------------------------------------------------------------------
 
 void CalendarScrapbookApp::onMouseButton(int button, int action, double mx, double my) {
+    interaction::EditScope editScope(history_, currentDay_, dragging_);
     mouseX_ = mx;
     mouseY_ = my;
 
@@ -973,9 +1052,11 @@ void CalendarScrapbookApp::onCursorPos(double mx, double my) {
             };
         }
     }
+    applySnapWhileDragging();
 }
 
 void CalendarScrapbookApp::onScroll(double /*xoffset*/, double yoffset) {
+    interaction::EditScope editScope(history_, currentDay_, dragging_);
     if (view_ != VIEW_DAY_PAGE || std::abs(yoffset) < 1e-4) return;
     // If no object is selected yet, check if the mouse cursor is hovering over an object and select it
     if (selectedElem_ < 0 || selectedElem_ >= (int)currentDay_.elements.size()) {
@@ -992,6 +1073,7 @@ void CalendarScrapbookApp::onScroll(double /*xoffset*/, double yoffset) {
 }
 
 void CalendarScrapbookApp::onKey(int key, int action) {
+    interaction::EditScope editScope(history_, currentDay_, dragging_);
     if (action != 1 && action != 2) return;
 
     if (view_ == VIEW_CALENDAR) {
@@ -1034,6 +1116,9 @@ void CalendarScrapbookApp::onKey(int key, int action) {
         }
         return; // Ignore single-key shortcuts while typing a sentence
     }
+
+    // ---- Option 4 shortcuts: C copy, Z undo, Y redo, G snap, H help, comma/period layers ----
+    if (handleInteractionKey(key, action)) return;
 
     // ---- VIEW_DAY_PAGE keys ----
     if (key == 66 || key == 258) { // 'B' or Tab -> Back to Calendar
@@ -1551,11 +1636,25 @@ void CalendarScrapbookApp::renderDayPageView(const DayLayout& layout, bool apply
         }
     }
 
+    // Option 4: alignment guides while a sticker is being dragged
+    if (dragging_ && dragMode_ == DRAG_MOVE) {
+        const Color guideCol{196, 92, 70, 210};
+        if (snapGuides_.hasX) {
+            gl::drawPolyline(Polygon{{snapGuides_.x, pageArea_.y0}, {snapGuides_.x, pageArea_.y1}},
+                             Mat3::identity(), guideCol);
+        }
+        if (snapGuides_.hasY) {
+            gl::drawPolyline(Polygon{{pageArea_.x0, snapGuides_.y}, {pageArea_.x1, snapGuides_.y}},
+                             Mat3::identity(), guideCol);
+        }
+    }
+
     // 6. Cohesive Bottom Status Ribbon (crisp integer scale = 2)
     drawRectGL(74, 536, 756, 560, kDeepGreen, kBrown);
     std::string statusMsg = editingNote_
         ? "WRITING JOURNAL   BACKSPACE DELETE   ENTER OR CLICK DONE TO FINISH"
-        : "DRAG R TO ROTATE   DRAG S OR SCROLL TO SCALE   CLICK X OR DEL TO REMOVE";
+        : (helpShowsKeys_ ? interaction::shortcutLine(snapEnabled_)
+                          : std::string("DRAG R TO ROTATE   DRAG S OR SCROLL TO SCALE   CLICK X OR DEL TO REMOVE"));
     drawCrispTextCentered(fontTex_, statusMsg, 415, 548, 2, kWhite, true, kDark);
 }
 

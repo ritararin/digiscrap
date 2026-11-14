@@ -55,6 +55,9 @@ add_library(scrapbook_modules
     src/textures/filter_mirror.cpp
     src/calendar/calendar.cpp
     src/calendar/day_storage.cpp
+    src/interaction/edit_history.cpp
+    src/interaction/layer_ops.cpp
+    src/interaction/snapping.cpp
 )
 target_include_directories(scrapbook_modules PUBLIC src)
 target_compile_definitions(scrapbook_modules PUBLIC _USE_MATH_DEFINES)
@@ -105,6 +108,12 @@ target_link_libraries(opengl_test PRIVATE opengl_renderer scrapbook_modules)
 add_executable(calendar_test src/calendar/test_calendar.cpp)
 target_link_libraries(calendar_test PRIVATE opengl_renderer scrapbook_modules)
 
+add_executable(interaction_test src/interaction/test_interaction.cpp)
+target_link_libraries(interaction_test PRIVATE scrapbook_modules)
+
+add_executable(interaction_app_test src/interaction/test_interaction_app.cpp)
+target_link_libraries(interaction_app_test PRIVATE opengl_renderer scrapbook_modules)
+
 # ---- Testing & Targets ----
 enable_testing()
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/output")
@@ -118,13 +127,15 @@ add_test(NAME easing_paths COMMAND easing_paths_test)
 add_test(NAME textures COMMAND textures_test)
 add_test(NAME opengl COMMAND opengl_test)
 add_test(NAME calendar COMMAND calendar_test)
+add_test(NAME interaction COMMAND interaction_test)
+add_test(NAME interaction_app COMMAND interaction_app_test)
 
-set_tests_properties(polygons clipping_colour lines_circles animation stickers easing_paths textures opengl calendar PROPERTIES
+set_tests_properties(polygons clipping_colour lines_circles animation stickers easing_paths textures opengl calendar interaction interaction_app PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_custom_target(check
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C $<CONFIG>
-    DEPENDS polygons_test clipping_colour_test lines_circles_test animation_test sticker_test easing_paths_test textures_test opengl_test calendar_test
+    DEPENDS polygons_test clipping_colour_test lines_circles_test animation_test sticker_test easing_paths_test textures_test opengl_test calendar_test interaction_test interaction_app_test
     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 add_custom_target(run

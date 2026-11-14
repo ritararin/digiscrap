@@ -34,7 +34,10 @@ easing_paths_test
 opengl_test
 textures_test
 calendar_test
+interaction_test
+interaction_app_test
 scrapbook_gl
 saves/
 test_tex.bmp
 test_tex.ppm
+output/test_saves_opt4_*/
