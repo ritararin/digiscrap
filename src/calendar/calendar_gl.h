@@ -12,6 +12,7 @@
 #include "calendar/calendar.h"
 #include "calendar/day_storage.h"
 #include "opengl/texture_renderer.h"
+#include "interaction/interaction.h"
 
 // ---- Pure animation helpers (testable without an OpenGL context) ----------
 
@@ -82,6 +83,13 @@ public:
     void triggerDropAnimation(int singleElementIndex = -1);
     bool saveCurrentDay();
 
+    // Option 4 (Interaction and Input): duplicate, undo/redo, layer order.
+    bool duplicateSelectedSticker();
+    bool undoEdit();
+    bool redoEdit();
+    bool moveSelectedLayer(int delta);   // +1 = one layer toward the front, -1 = one layer back
+    bool snappingEnabled() const { return snapEnabled_; }
+
     ViewMode              viewMode() const { return view_; }
     int                   highlightedDay() const { return highlightedDay_; }
     int                   selectedElementIndex() const { return selectedElem_; }
@@ -147,6 +155,13 @@ private:
     double         dragStartDist_   = 1.0;
     Vec2           initialScale_{1.0, 1.0};
 
+    // Option 4: undo history, snapping and help-line state.
+    interaction::EditHistory history_;
+    interaction::PageArea    pageArea_;          // must match the clamp used when dragging
+    interaction::SnapGuides  snapGuides_;
+    bool                     snapEnabled_   = true;
+    bool                     helpShowsKeys_ = true;
+
     HighlightMoveState highlightAnim_{};
     DropSettleState    dropAnim_{};
     PageTurnState      pageTurnAnim_{};
@@ -165,4 +180,7 @@ private:
     void renderCalendarView();
     void renderDayPageView(const DayLayout& layout, bool applyDropAnim);
     void renderPageTurnOverlay();
+
+    bool handleInteractionKey(int key, int action);
+    void applySnapWhileDragging();
 };
