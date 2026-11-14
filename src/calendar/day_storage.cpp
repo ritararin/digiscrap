@@ -27,6 +27,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -177,6 +178,56 @@ static bool decodeImageWithGdiPlus(const std::string& filePath, Framebuffer& out
 }
 #endif
 
+#ifndef _WIN32
+namespace {
+
+// Wrap text in single quotes so /bin/sh treats it as ONE word (a ' inside becomes '\'').
+[[maybe_unused]] std::string shellQuote(const std::string& text) {
+    std::string out = "'";
+    for (char c : text) {
+        if (c == '\'') out += "'\\''";
+        else            out += c;
+    }
+    out += "'";
+    return out;
+}
+
+// Run a shell command and return what it printed, without the trailing newline.
+std::string runAndCapture(const std::string& command) {
+    std::string out;
+    FILE* pipe = popen(command.c_str(), "r");
+    if (!pipe) return out;
+    char buf[512];
+    while (fgets(buf, sizeof(buf), pipe)) out += buf;
+    pclose(pipe);
+    while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) out.pop_back();
+    return out;
+}
+
+// Our own loaders only read BMP and PPM. On macOS the built-in `sips` tool converts any
+// other picture (PNG, JPG, HEIC ...) to a temporary BMP that loadBMP can then read.
+bool decodeImageWithSystemTool(const std::string& srcFilePath, Framebuffer& out) {
+#ifdef __APPLE__
+    std::error_code ec;
+    const std::filesystem::path tmp = std::filesystem::temp_directory_path(ec) / "digiscrap_import.bmp";
+    if (ec) return false;
+    std::filesystem::remove(tmp, ec);
+    const std::string cmd = "sips -s format bmp " + shellQuote(srcFilePath) +
+                            " --out " + shellQuote(tmp.string()) + " >/dev/null 2>&1";
+    if (std::system(cmd.c_str()) != 0) return false;
+    const bool ok = loadBMP(tmp.string(), out);
+    std::filesystem::remove(tmp, ec);
+    return ok;
+#else
+    (void)srcFilePath;
+    (void)out;
+    return false;
+#endif
+}
+
+}  // namespace
+#endif
+
 bool importUserPhotoFile(const std::string& srcFilePath,
                          const std::string& destBmpPath,
                          Framebuffer& outFb,
@@ -188,6 +239,10 @@ bool importUserPhotoFile(const std::string& srcFilePath,
 #ifdef _WIN32
     if (!loadedOk) {
         loadedOk = decodeImageWithGdiPlus(srcFilePath, raw);
+    }
+#else
+    if (!loadedOk) {
+        loadedOk = decodeImageWithSystemTool(srcFilePath, raw);
     }
 #endif
     if (!loadedOk || raw.width <= 0 || raw.height <= 0) {
@@ -230,8 +285,16 @@ std::string openPhotoFileDialog() {
     if (GetOpenFileNameA(&ofn)) {
         return std::string(fileBuf);
     }
-#endif
     return "";
+#elif defined(__APPLE__)
+    // macOS: the system "choose file" dialog (cancelling prints nothing, so we return "").
+    return runAndCapture(
+        "osascript -e 'POSIX path of (choose file with prompt "
+        "\"Select a photo for this day\" of type {\"public.image\"})' 2>/dev/null");
+#else
+    // Linux: use zenity when it is installed; otherwise drag a file onto the window.
+    return runAndCapture("zenity --file-selection --title='Select a photo' 2>/dev/null");
+#endif
 }
 
 Framebuffer resolveDayPhoto(const DayLayout& layout, int w, int h) {
