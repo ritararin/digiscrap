@@ -24,6 +24,7 @@
 #include "textures/image_loader.h"
 #include "textures/font_atlas.h"
 #include "calendar/calendar_gl.h"
+#include "stickers/demo_triangulation.h"
 
 
 // ---------- shared palette (taken from the project deck) ----------
@@ -1077,6 +1078,7 @@ int main(int argc, char* argv[]) {
 
     runDemoSequences();
     runStickerDemos();
+    runTriangulationDemo();
 
     // Check for headless / non-interactive flag (useful for automated ctest / CI)
     bool headless = false;
