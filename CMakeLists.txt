@@ -47,6 +47,7 @@ add_library(scrapbook_modules
     src/easing/easing.cpp
     src/paths/paths.cpp
     src/transitions/transitions.cpp
+    src/shapes/scrapbook_shapes.cpp
     src/animation/exporter.cpp
     src/animation/demo_sequences.cpp
     src/stickers/demo_drag.cpp
@@ -69,6 +70,7 @@ add_library(opengl_renderer STATIC
     src/opengl/renderer.cpp
     src/opengl/texture_renderer.cpp
     src/calendar/calendar_gl.cpp
+    src/stickers/demo_triangulation.cpp
 )
 target_include_directories(opengl_renderer PUBLIC src extern/glad/include)
 target_link_libraries(opengl_renderer PUBLIC glad glfw OpenGL::GL scrapbook_modules)
